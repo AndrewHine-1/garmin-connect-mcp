@@ -24,6 +24,9 @@ async function main(): Promise<void> {
   if (command === "login") {
     const { runLogin } = await import("./auth.js");
     await runLogin();
+  } else if (command === "dashboard") {
+    const { startDashboard } = await import("./dashboard.js");
+    await startDashboard();
   } else {
     await startMcpServer();
   }

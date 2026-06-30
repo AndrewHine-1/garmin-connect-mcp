@@ -24,6 +24,8 @@
   "scripts": {
     "build": "tsc && chmod 755 dist/index.js",
     "dev": "tsx src/index.ts",
+    "dashboard": "node dist/index.js dashboard",
+    "dev:dashboard": "tsx src/index.ts dashboard",
     "test": "tsx src/test.ts",
     "lint": "eslint .",
     "format": "prettier --write src/",

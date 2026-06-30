@@ -193,6 +193,39 @@ Claude Desktop.
 > for a few weeks before trusting a signal. The confidence label is based on the
 > p-value of the test.
 
+## Dashboard (Cadence)
+
+A local web dashboard that wraps the same commands in a visual UI — a Whoop/Oura-style
+recovery cockpit with the habit journal as the flagship. It runs as a tiny Node HTTP
+server bound to `127.0.0.1` (no external deps) and serves a single page.
+
+```bash
+npm run build
+npm run dashboard          # opens http://127.0.0.1:8765 in your browser
+# or: node dist/index.js dashboard
+```
+
+What it gives you:
+
+- **Auto-login** — an auth pill in the top bar. Click it (or trigger any command that
+  needs Garmin) and a real browser opens; finish logging in and the dashboard captures
+  your session automatically, then retries what you were doing. No terminal step.
+- **Today** — a Training Readiness ring (PRIMED / STEADY / STRAINED) with a one-line
+  coach read, and an above-the-fold habit logger (tap Yes/No or type a number; autosaves).
+- **Recovery glance** — tiles for Sleep, HRV, Resting HR, Stress. Click a tile to
+  re-target the correlation table against that metric.
+- **What's moving your recovery** — the `analyze-habits` payoff: a ranked table with
+  effect direction, magnitude (% change or Pearson r), and a confidence dot-meter;
+  low-confidence rows are dimmed with a "needs N more days" nudge.
+- **History & streaks** — a 30-day grid of your logged habits (local data, no API).
+- **Command Console** — a collapsible panel that exposes every read command and habit
+  action with an auto-generated, typed parameter form, Pretty/Raw result tabs, copy +
+  download, and a re-runnable session log. The friendly sections call these same commands.
+
+Config: `GARMIN_DASHBOARD_PORT` (default `8765`), `GARMIN_DASHBOARD_NO_OPEN=1` to skip
+auto-opening the browser. Data and session live in `~/.garmin-connect-mcp/`, shared with
+the MCP server — so logging a habit in the dashboard shows up for Claude too.
+
 ## Architecture
 
 ```

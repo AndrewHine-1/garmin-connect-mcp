@@ -51,6 +51,7 @@ export class GarminClient {
   private csrfToken: string;
   private cookies: Cookie[];
   private initialized = false;
+  private initPromise: Promise<void> | null = null;
   private displayName: string | null = null;
 
   constructor(sessionPath?: string) {
@@ -62,9 +63,20 @@ export class GarminClient {
     this.cookies = session.cookies;
   }
 
-  private async init(): Promise<void> {
-    if (this.initialized) return;
+  private init(): Promise<void> {
+    if (this.initialized) return Promise.resolve();
+    // Memoize the in-flight launch so concurrent callers (e.g. the dashboard
+    // firing the snapshot and analyze requests at once) share one browser.
+    if (!this.initPromise) {
+      this.initPromise = this._doInit().catch((e) => {
+        this.initPromise = null; // allow a later retry after a failed launch
+        throw e;
+      });
+    }
+    return this.initPromise;
+  }
 
+  private async _doInit(): Promise<void> {
     let playwright;
     try {
       playwright = await import("playwright");
@@ -121,6 +133,7 @@ export class GarminClient {
       this.browser = null;
       this.page = null;
       this.initialized = false;
+      this.initPromise = null;
     }
   }
 
