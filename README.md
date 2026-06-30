@@ -139,6 +139,60 @@ Session cookies expire after a few hours. Re-run the login flow when they do.
 | `delete-workout`       | Delete a workout                                   |
 | `download-workout-fit` | Download a workout as a FIT file                   |
 
+### Habit Journal (recovery insights)
+
+| Tool             | Description                                                      |
+| ---------------- | --------------------------------------------------------------- |
+| `add-habit`      | Define a custom habit (boolean yes/no, or numeric)              |
+| `list-habits`    | List your defined habits                                        |
+| `delete-habit`   | Delete a habit (and optionally its logged values)               |
+| `log-habit`      | Record a habit's value for a day (defaults to today)            |
+| `unlog-habit`    | Remove a habit's value for a day                                |
+| `get-journal`    | Show logged habit entries over a date range                     |
+| `analyze-habit`  | Correlate ONE habit with a recovery metric (t-test/correlation) |
+| `analyze-habits` | Rank ALL habits by their effect on a recovery metric            |
+
+## Habit Journal
+
+A [Whoop Journal](https://www.whoop.com/)-style feature: track any daily habit you
+name yourself, then see how it correlates with your recovery.
+
+**Define your own habits** — anything, e.g. `Alcohol`, `Caffeine (mg)`,
+`Magnesium`, `Screen before bed`, `Ate late`. Each habit is either:
+
+- **boolean** — a yes/no behavior (`add-habit name:"Alcohol" type:boolean`)
+- **numeric** — a quantity or 1–10 scale (`add-habit name:"Caffeine (mg)" type:numeric`)
+
+**Log daily** — `log-habit habit:"Alcohol" value:yes` (defaults to today, or pass
+`date:YYYY-MM-DD`). Numeric: `log-habit habit:"Caffeine (mg)" value:120`.
+
+**Get insights** — `analyze-habit habit:"Alcohol"` pulls a recovery metric from
+Garmin for each logged day and runs a proper test:
+
+- boolean habits → Welch's two-sample t-test (habit days vs. non-habit days)
+- numeric habits → Pearson correlation
+
+It reports the effect size, % change, and a confidence level (high/medium/low),
+e.g. _"On days you did Alcohol, your Training Readiness was 23 points lower
+(−29%), confidence: high"_. Use `analyze-habits` for a ranked overview of every
+habit at once.
+
+**Recovery metrics** (choose with `metric:`): `training_readiness` (default,
+Garmin's closest analog to a Whoop recovery score), `sleep_score`, `hrv`,
+`resting_hr`, `stress_avg`. For `resting_hr` and `stress_avg`, lower is better —
+the analysis accounts for this automatically and still reports the direction in
+terms of recovery.
+
+**Storage** — habits and daily values are stored locally in
+`~/.garmin-connect-mcp/journal.json` (the same folder as your session). Defining
+and logging habits needs no Garmin login; only the `analyze-*` tools call Garmin.
+Because the data lives on disk, it's identical whether you use Claude Code or
+Claude Desktop.
+
+> Correlation isn't causation, and small samples are noisy — log consistently
+> for a few weeks before trusting a signal. The confidence label is based on the
+> p-value of the test.
+
 ## Architecture
 
 ```
