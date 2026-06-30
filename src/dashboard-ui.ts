@@ -526,7 +526,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       }).join("");
       var meta='<div class="muted" style="font-size:12px;margin-bottom:10px">Effect on: <b style="color:var(--accent)">'+esc(d.metricLabel)+'</b> · '+d.loggedDays+' logged days · '+d.metricCoverage+' with metric data ('+esc(d.startDate)+' → '+esc(d.endDate)+')</div>';
       qs("#analyzecard").innerHTML = pickHtml + meta + '<table class="an">'+head+body+'</table>'
-        + '<div class="disclaimer">Boolean habits: % change in '+esc(d.metricLabel)+' on habit days vs. not (Welch t-test). Numeric: Pearson r. Direction already accounts for metrics where lower is better. Correlation is not causation.</div>';
+        + '<div class="disclaimer">Log a habit on the day you did it — overnight metrics (readiness, sleep, HRV, resting HR) are matched to the <b>next morning</b>; stress is same-day. Boolean: % change on habit days vs. not (Welch t-test); numeric: Pearson r. Direction accounts for metrics where lower is better. Correlation is not causation.</div>';
     });
   }
 

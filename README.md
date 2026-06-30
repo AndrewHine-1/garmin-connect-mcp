@@ -177,6 +177,16 @@ e.g. _"On days you did Alcohol, your Training Readiness was 23 points lower
 (−29%), confidence: high"_. Use `analyze-habits` for a ranked overview of every
 habit at once.
 
+**Timing — log a habit on the day you did it.** Garmin stamps a night's sleep
+and the morning recovery metrics derived from it with the **wake-up date**, so a
+behavior on day _D_ shows up in the recovery reported on the morning of _D+1_.
+The analysis handles this for you: overnight metrics (training readiness, sleep
+score, HRV, resting HR) are matched to the **next morning's** value, while
+same-day stress is matched to the same day. So you just log what you did when you
+did it — e.g. log "Alcohol" the night you drink, and it's correlated against the
+next morning's readiness. (A habit logged today won't have a result until
+tomorrow's recovery syncs.)
+
 **Recovery metrics** (choose with `metric:`): `training_readiness` (default,
 Garmin's closest analog to a Whoop recovery score), `sleep_score`, `hrv`,
 `resting_hr`, `stress_avg`. For `resting_hr` and `stress_avg`, lower is better —

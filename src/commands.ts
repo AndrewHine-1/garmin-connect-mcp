@@ -22,6 +22,7 @@ import {
   metricKeys,
   getMetric,
   fetchMetricSeries,
+  metricFetchDates,
 } from "./recovery-metrics.js";
 import { analyzeHabit, formatDetailed } from "./analysis.js";
 
@@ -760,7 +761,7 @@ export const COMMANDS: CommandDef[] = [
       const series = await fetchMetricSeries(
         ctx.requireClient(),
         metric,
-        habitDates
+        metricFetchDates(metric, habitDates)
       );
       const result = analyzeHabit(data, habit, metricDef, series, start, end);
       return { ...result, text: formatDetailed(result, metricDef) };
@@ -786,7 +787,7 @@ export const COMMANDS: CommandDef[] = [
       const series = await fetchMetricSeries(
         ctx.requireClient(),
         metric,
-        dates
+        metricFetchDates(metric, dates)
       );
       const results = data.habits.map((h) =>
         analyzeHabit(data, h, metricDef, series, start, end)

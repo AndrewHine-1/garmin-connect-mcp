@@ -22,6 +22,7 @@ import {
 import {
   DEFAULT_METRIC,
   fetchMetricSeries,
+  metricFetchDates,
   getMetric,
   metricKeys,
 } from "./recovery-metrics.js";
@@ -1088,7 +1089,7 @@ Example with RepeatGroupDTO for intervals:
 
   server.tool(
     "analyze-habit",
-    `Analyze how ONE habit affects a recovery metric (Whoop Journal style). Pulls the metric from Garmin for each day you logged the habit, then runs a two-sample t-test (boolean habits) or Pearson correlation (numeric habits) and reports the effect size and confidence.
+    `Analyze how ONE habit affects a recovery metric (Whoop Journal style). Log a habit on the day you did it; overnight-recovery metrics (training readiness, sleep, HRV, resting HR) are automatically matched to the NEXT morning's value (the night the behavior affected), while same-day stress is matched same-day. Runs a two-sample t-test (boolean habits) or Pearson correlation (numeric habits) and reports the effect size and confidence.
 
 Metrics: ${metricKeys().join(", ")} (default: ${DEFAULT_METRIC}). Defaults to the last 60 days. Requires a valid Garmin session (run check-session first).`,
     {
@@ -1124,7 +1125,11 @@ Metrics: ${metricKeys().join(", ")} (default: ${DEFAULT_METRIC}). Defaults to th
           );
         }
         const client = getClient();
-        const series = await fetchMetricSeries(client, metric, habitDates);
+        const series = await fetchMetricSeries(
+          client,
+          metric,
+          metricFetchDates(metric, habitDates)
+        );
         const result = analyzeHabit(data, h, metricDef, series, start, end);
         return textResult(formatDetailed(result, metricDef));
       } catch (e) {
@@ -1135,7 +1140,7 @@ Metrics: ${metricKeys().join(", ")} (default: ${DEFAULT_METRIC}). Defaults to th
 
   server.tool(
     "analyze-habits",
-    `Overview: analyze ALL your habits against one recovery metric at once (the Whoop "behaviors" dashboard). Fetches the metric once per logged day, then ranks every habit by confidence and effect size.
+    `Overview: analyze ALL your habits against one recovery metric at once (the Whoop "behaviors" dashboard). Log habits on the day you did them; overnight-recovery metrics are matched to the NEXT morning automatically (stress is same-day). Ranks every habit by confidence and effect size.
 
 Metrics: ${metricKeys().join(", ")} (default: ${DEFAULT_METRIC}). Defaults to the last 60 days. Requires a valid Garmin session (run check-session first).`,
     {
@@ -1167,7 +1172,11 @@ Metrics: ${metricKeys().join(", ")} (default: ${DEFAULT_METRIC}). Defaults to th
           );
         }
         const client = getClient();
-        const series = await fetchMetricSeries(client, metric, dates);
+        const series = await fetchMetricSeries(
+          client,
+          metric,
+          metricFetchDates(metric, dates)
+        );
         const analyses = data.habits.map((h) =>
           analyzeHabit(data, h, metricDef, series, start, end)
         );

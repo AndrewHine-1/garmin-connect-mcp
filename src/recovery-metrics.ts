@@ -14,6 +14,13 @@ export interface MetricDef {
   unit: string;
   /** true = a higher value means better recovery (readiness); false = lower is better (resting HR, stress). */
   higherIsBetter: boolean;
+  /**
+   * Days between when a habit happens and when this metric reflects it.
+   * Garmin stamps overnight-recovery metrics (readiness, sleep, HRV, resting HR)
+   * with the WAKE date, so a behavior on day D shows up in metric[D+1] — lag 1.
+   * Same-day daytime metrics (stress) use lag 0.
+   */
+  lagDays: number;
   /** Fetch the raw JSON for one date. */
   fetch: (client: GarminClient, date: string) => Promise<unknown>;
   /** Pull the scalar value out of the raw JSON; null if unavailable. */
@@ -49,6 +56,7 @@ export const METRICS: Record<string, MetricDef> = {
     label: "Training Readiness",
     unit: "score (0-100)",
     higherIsBetter: true,
+    lagDays: 1,
     fetch: (c, d) => c.get(`metrics-service/metrics/trainingreadiness/${d}`),
     extract: (raw) => pickNumber(raw, ["score", "trainingReadinessScore"]),
   },
@@ -57,6 +65,7 @@ export const METRICS: Record<string, MetricDef> = {
     label: "Sleep Score",
     unit: "score (0-100)",
     higherIsBetter: true,
+    lagDays: 1,
     fetch: (c, d) =>
       c.get("sleep-service/sleep/dailySleepData", {
         date: d,
@@ -73,6 +82,7 @@ export const METRICS: Record<string, MetricDef> = {
     label: "HRV (overnight avg)",
     unit: "ms",
     higherIsBetter: true,
+    lagDays: 1,
     fetch: (c, d) => c.get(`hrv-service/hrv/${d}`),
     extract: (raw) =>
       pickNumber(raw, [
@@ -86,6 +96,7 @@ export const METRICS: Record<string, MetricDef> = {
     label: "Resting Heart Rate",
     unit: "bpm",
     higherIsBetter: false,
+    lagDays: 1,
     fetch: (c, d) =>
       c.get("wellness-service/wellness/dailyHeartRate", { date: d }),
     extract: (raw) =>
@@ -96,6 +107,7 @@ export const METRICS: Record<string, MetricDef> = {
     label: "Average Stress",
     unit: "stress (0-100)",
     higherIsBetter: false,
+    lagDays: 0,
     fetch: (c, d) => c.get(`wellness-service/wellness/dailyStress/${d}`),
     extract: (raw) => pickNumber(raw, ["avgStressLevel", "overallStressLevel"]),
   },
@@ -115,6 +127,27 @@ export function getMetric(key: string): MetricDef {
     );
   }
   return m;
+}
+
+/** Calendar-day arithmetic on a YYYY-MM-DD string (UTC-anchored, whole days). */
+export function shiftISODate(date: string, days: number): string {
+  const d = new Date(date + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The set of dates to fetch a metric for, given the dates habits were logged.
+ * Applies the metric's lag (e.g. a habit on D is matched to readiness on D+1),
+ * de-duplicated. Pair this with analyzeHabit, which shifts by the same lag.
+ */
+export function metricFetchDates(
+  metricKey: string,
+  habitDates: string[]
+): string[] {
+  const lag = getMetric(metricKey).lagDays;
+  const set = new Set(habitDates.map((d) => shiftISODate(d, lag)));
+  return [...set].sort();
 }
 
 /**

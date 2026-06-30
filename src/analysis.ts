@@ -9,7 +9,7 @@ import {
   GroupComparison,
   Correlation,
 } from "./stats.js";
-import { MetricDef } from "./recovery-metrics.js";
+import { MetricDef, shiftISODate } from "./recovery-metrics.js";
 
 export interface HabitAnalysis {
   habitId: string;
@@ -56,10 +56,12 @@ export function analyzeHabit(
   };
 
   const series = habitSeries(data, habit.id, startDate, endDate);
-  // Pair each logged day with its metric value (drop days with no metric data).
+  // Pair each logged habit-day D with the metric that reflects it. Overnight
+  // metrics land on D+lag (Garmin's wake-date stamping), so look up the shifted
+  // date. Days with no metric data are dropped.
   const paired: { value: boolean | number; metric: number }[] = [];
   for (const { date, value } of series) {
-    const m = metricSeries.get(date);
+    const m = metricSeries.get(shiftISODate(date, metric.lagDays));
     if (m == null) continue;
     paired.push({ value, metric: m });
   }
