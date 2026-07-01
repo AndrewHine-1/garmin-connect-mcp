@@ -183,7 +183,19 @@ export async function performLogin(
   }
 
   if (!context) {
-    browser = await playwright.chromium.launch({ headless: false });
+    try {
+      // Real Chrome with a fresh profile — works even when the user's Chrome
+      // profile is locked (Chrome already open). Preferred over the bundled
+      // Chromium, whose headful mode crashes (dlopen) on some macOS setups.
+      browser = await playwright.chromium.launch({
+        headless: false,
+        channel: "chrome",
+      });
+      log("Using Google Chrome (fresh profile).");
+    } catch {
+      log("Google Chrome unavailable — falling back to the bundled browser.");
+      browser = await playwright.chromium.launch({ headless: false });
+    }
     context = await browser.newContext();
     method = "fresh-chromium";
   }
