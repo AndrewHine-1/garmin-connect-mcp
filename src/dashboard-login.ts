@@ -47,6 +47,19 @@ class MfaRequiredError extends Error {
   }
 }
 
+// Garmin/Cloudflare rejects logins from a browser that advertises automation
+// (navigator.webdriver + the --enable-automation flag) with a generic
+// "AN UNEXPECTED ERROR HAS OCCURRED". Launching without those flags — and
+// hiding navigator.webdriver — makes credential login succeed.
+const STEALTH_ARGS = ["--disable-blink-features=AutomationControlled"];
+const STEALTH_IGNORE_DEFAULT_ARGS = ["--enable-automation"];
+
+async function applyStealth(page: any): Promise<void> {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+  });
+}
+
 async function importPlaywright(): Promise<typeof import("playwright")> {
   try {
     return await import("playwright");
@@ -101,20 +114,43 @@ async function captureSession(
     }
     if (!url.includes("connect.garmin.com")) continue;
 
-    csrf = await page.evaluate(CSRF_EVAL).catch(() => null);
     cookies = await context.cookies().catch(() => []);
     const hasAuth = cookies.some(
       (c: { name: string; domain?: string }) =>
         c.domain?.includes("garmin") && AUTH_COOKIE_RE.test(c.name)
     );
-    if (csrf && hasAuth) break;
+    if (!hasAuth) continue; // on connect.* but not authenticated yet
+
+    // Logged in. The post-SSO landing page often doesn't carry the CSRF <meta>
+    // yet, so do one clean load of the activities page to capture it. The token
+    // is best-effort (GET calls work without it), so don't fail if it's absent.
+    csrf = await page.evaluate(CSRF_EVAL).catch(() => null);
+    if (!csrf) {
+      try {
+        await page.goto("https://connect.garmin.com/app/activities", {
+          waitUntil: "domcontentloaded",
+          timeout: 30000,
+        });
+        await sleep(2000);
+        csrf = await page.evaluate(CSRF_EVAL).catch(() => null);
+        cookies = await context.cookies().catch(() => cookies);
+      } catch {
+        /* proceed with whatever we captured */
+      }
+    }
+    if (process.env.GARMIN_LOGIN_DEBUG) {
+      log(
+        `debug: logged in — csrf=${csrf ? "yes" : "no"} cookies=${cookies.length}`
+      );
+    }
+    break;
   }
 
   const garminCookies = cookies
     .filter((c) => c.domain?.includes("garmin"))
     .map((c) => ({ name: c.name, value: c.value, domain: c.domain }));
 
-  if (!csrf || garminCookies.length === 0) {
+  if (garminCookies.length === 0) {
     return {
       ok: false,
       method,
@@ -127,7 +163,7 @@ async function captureSession(
   mkdirSync(getSessionDir(), { recursive: true, mode: 0o700 });
   writeFileSync(
     getSessionFile(),
-    JSON.stringify({ csrf_token: csrf, cookies: garminCookies }, null, 2),
+    JSON.stringify({ csrf_token: csrf ?? "", cookies: garminCookies }, null, 2),
     { mode: 0o600 }
   );
   log(`Session saved (${garminCookies.length} cookies) via ${method}.`);
@@ -171,7 +207,12 @@ export async function performLogin(
       );
       context = await playwright.chromium.launchPersistentContext(
         chromeDataDir,
-        { headless: false, channel: "chrome" }
+        {
+          headless: false,
+          channel: "chrome",
+          ignoreDefaultArgs: STEALTH_IGNORE_DEFAULT_ARGS,
+          args: STEALTH_ARGS,
+        }
       );
       method = "chrome-profile";
     } catch {
@@ -190,6 +231,8 @@ export async function performLogin(
       browser = await playwright.chromium.launch({
         headless: false,
         channel: "chrome",
+        ignoreDefaultArgs: STEALTH_IGNORE_DEFAULT_ARGS,
+        args: STEALTH_ARGS,
       });
       log("Using Google Chrome (fresh profile).");
     } catch {
@@ -202,6 +245,7 @@ export async function performLogin(
 
   try {
     const page = await context.newPage();
+    await applyStealth(page);
     log("Navigating to Garmin Connect — log in if prompted…");
     await page.goto("https://connect.garmin.com/app/activities", {
       waitUntil: "domcontentloaded",
@@ -246,40 +290,51 @@ export async function performAutoLogin(
     );
   }
   const playwright = await importPlaywright();
-  const headful = Boolean(process.env.GARMIN_LOGIN_HEADFUL);
+  // Cloudflare blocks HEADLESS browsers on the Garmin sign-in page ("Just a
+  // moment…"), so run a visible real-Chrome window by default — it still fills
+  // and submits itself, no typing. Set GARMIN_LOGIN_HEADLESS=1 to force headless
+  // (only works on hosts/IPs where Cloudflare doesn't challenge it).
+  const headless = Boolean(process.env.GARMIN_LOGIN_HEADLESS);
 
   let browser: any;
   try {
-    // Real Chrome has the best fingerprint against Cloudflare; fall back to the
-    // bundled Chromium if Chrome isn't installed.
+    // Real Chrome passes Cloudflare and (unlike the bundled Chromium) doesn't
+    // crash headful on macOS; fall back to bundled only if Chrome isn't installed.
     browser = await playwright.chromium.launch({
-      headless: !headful,
+      headless,
       channel: "chrome",
+      ignoreDefaultArgs: STEALTH_IGNORE_DEFAULT_ARGS,
+      args: STEALTH_ARGS,
     });
   } catch {
-    browser = await playwright.chromium.launch({ headless: !headful });
+    browser = await playwright.chromium.launch({
+      headless,
+      ignoreDefaultArgs: STEALTH_IGNORE_DEFAULT_ARGS,
+      args: STEALTH_ARGS,
+    });
   }
   const context = await browser.newContext();
 
   try {
     const page = await context.newPage();
+    await applyStealth(page);
     log("Signing in with stored credentials…");
     await page.goto(SIGNIN_URL, {
       waitUntil: "domcontentloaded",
       timeout: 60000,
     });
     await page.waitForSelector("#email", { timeout: 30000 });
-    await page.fill("#email", creds.email);
-    await page.fill("#password", creds.password);
-    // "Remember me" for a longer-lived session.
-    try {
-      await page.check('input[name="remember"]', { timeout: 2000 });
-    } catch {
-      // checkbox optional / absent — ignore
-    }
+    // Type like a human, with small pauses between fields — this sequence gets
+    // past Garmin's checks (direct value-setting / no pauses is flagged).
+    await page.click("#email");
+    await page.locator("#email").pressSequentially(creds.email, { delay: 60 });
+    await sleep(400);
+    await page.click("#password");
     await page
-      .click('button[data-testid="g__button"]', { timeout: 10000 })
-      .catch(() => page.click('button[type="submit"]'));
+      .locator("#password")
+      .pressSequentially(creds.password, { delay: 60 });
+    await sleep(600);
+    await page.click('button[data-testid="g__button"]', { timeout: 10000 });
 
     const result = await captureSession(
       page,
@@ -291,7 +346,7 @@ export async function performAutoLogin(
     );
     if (!result.ok) {
       result.message =
-        "Automated login didn't complete — check your stored email/password. If your account has 2FA, use manual login instead.";
+        "Automated login didn't complete. Likely causes: your account has 2FA (use manual login), too many recent attempts (Garmin rate-limits — wait a few minutes and retry), or a wrong stored password.";
     }
     return result;
   } catch (e) {
