@@ -251,7 +251,7 @@ export const DASHBOARD_HTML = `<!doctype html>
 <script>
 (function(){
   "use strict";
-  var S = { date:null, pinned:"training_readiness", authed:false, sessionExpired:false, commands:[], selCmd:null, sessionLog:[], pending:null, journal:null, resultMode:"pretty", lastResult:null };
+  var S = { date:null, pinned:"training_readiness", authed:false, sessionExpired:false, autoLogin:false, commands:[], selCmd:null, sessionLog:[], pending:null, journal:null, resultMode:"pretty", lastResult:null };
 
   function qs(s){ return document.querySelector(s); }
   function esc(v){ return String(v==null?"":v).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c]; }); }
@@ -296,8 +296,8 @@ export const DASHBOARD_HTML = `<!doctype html>
 
   function refreshAuth(){
     return getJSON("/api/status").then(function(s){
-      S.serverToday=s.today;
-      qs("#ft-session").textContent = "Session file: "+s.sessionFile;
+      S.serverToday=s.today; S.autoLogin=!!s.autoLogin;
+      qs("#ft-session").textContent = "Session file: "+s.sessionFile+(s.autoLogin?" · auto-login on":"");
       // The status endpoint only knows the session FILE exists; if a data call
       // already proved the cookies are expired, keep treating us as logged out.
       S.authed = !!s.authenticated && !S.sessionExpired;
@@ -312,7 +312,8 @@ export const DASHBOARD_HTML = `<!doctype html>
     S.sessionExpired = true;
     S.authed = false;
     applyAuth();
-    qs("#tiles").innerHTML='<div class="muted">Your Garmin session expired. Click <b>“Session expired — log in”</b> at the top right to reconnect.</div>';
+    var extra = S.autoLogin ? " Auto-login is set up but couldn’t reconnect — your account may require 2FA, or the stored password is wrong." : "";
+    qs("#tiles").innerHTML='<div class="muted">Your Garmin session expired. Click <b>“Session expired — log in”</b> at the top right to reconnect.'+extra+'</div>';
     qs("#analyzecard").innerHTML='<div class="muted">Log in again to refresh your recovery insights.</div>';
     renderRing(null);
     qs("#coachline").textContent="Session expired.";

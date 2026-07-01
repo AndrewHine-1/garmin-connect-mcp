@@ -4,3 +4,6 @@ dist/
 .env
 fit_files/
 dashboard.html
+# never commit credentials or a saved session
+credentials.json
+session.json

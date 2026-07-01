@@ -22,8 +22,28 @@ async function main(): Promise<void> {
   const command = process.argv[2];
 
   if (command === "login") {
+    if (process.argv.includes("--auto")) {
+      const { performAutoLogin } = await import("./dashboard-login.js");
+      const result = await performAutoLogin();
+      console.error(result.message);
+      process.exit(result.ok ? 0 : 1);
+    }
     const { runLogin } = await import("./auth.js");
     await runLogin();
+  } else if (command === "save-credentials") {
+    const { saveCredentials, getCredentialsFile } =
+      await import("./credentials.js");
+    const email = process.env.GARMIN_EMAIL;
+    const password = process.env.GARMIN_PASSWORD;
+    if (!email || !password) {
+      console.error(
+        "Set GARMIN_EMAIL and GARMIN_PASSWORD, then run:\n" +
+          "  GARMIN_EMAIL=you@example.com GARMIN_PASSWORD='...' node dist/index.js save-credentials"
+      );
+      process.exit(1);
+    }
+    saveCredentials(email, password);
+    console.error(`Saved credentials to ${getCredentialsFile()} (mode 0600).`);
   } else if (command === "dashboard") {
     const { startDashboard } = await import("./dashboard.js");
     await startDashboard();

@@ -236,6 +236,41 @@ Config: `GARMIN_DASHBOARD_PORT` (default `8765`), `GARMIN_DASHBOARD_NO_OPEN=1` t
 auto-opening the browser. Data and session live in `~/.garmin-connect-mcp/`, shared with
 the MCP server — so logging a habit in the dashboard shows up for Claude too.
 
+### Automatic login (optional, unattended)
+
+Garmin web sessions expire after a few hours, so the manual browser login recurs. If you
+want it to re-authenticate itself, store your Garmin credentials locally and the dashboard
+will re-login on its own whenever the session expires — no window, no clicking.
+
+Provide credentials **either** via environment variables:
+
+```bash
+export GARMIN_EMAIL="you@example.com"
+export GARMIN_PASSWORD="your-garmin-password"
+```
+
+**or** save them to `~/.garmin-connect-mcp/credentials.json` (written with `0600`, owner-only):
+
+```bash
+GARMIN_EMAIL="you@example.com" GARMIN_PASSWORD='...' node dist/index.js save-credentials
+```
+
+Then the dashboard auto-relogins transparently when a request hits an expired session
+(the footer shows "auto-login on"). You can also trigger it directly:
+
+```bash
+node dist/index.js login --auto        # unattended, headless
+GARMIN_LOGIN_HEADFUL=1 node dist/index.js login --auto   # show the browser (if Cloudflare complains)
+```
+
+**Caveats & security:**
+
+- **2FA blocks it.** If your Garmin account has two-factor auth, automated login can't
+  enter the code — it detects the 2FA prompt and asks you to use manual login instead.
+- Credentials are your real password stored in plaintext on your machine. Keep the file
+  `0600`, never commit it (it's git-ignored), and prefer this only on a machine you control.
+- If Cloudflare challenges the headless browser, run once with `GARMIN_LOGIN_HEADFUL=1`.
+
 ## Architecture
 
 ```

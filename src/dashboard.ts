@@ -15,8 +15,14 @@ import {
   GarminClient,
   isSessionExpiredError,
 } from "./garmin-client.js";
-import { COMMAND_MAP, serializeCommands, RunContext } from "./commands.js";
-import { performLogin } from "./dashboard-login.js";
+import {
+  COMMAND_MAP,
+  serializeCommands,
+  RunContext,
+  CommandDef,
+} from "./commands.js";
+import { performLogin, performAutoLogin } from "./dashboard-login.js";
+import { hasCredentials } from "./credentials.js";
 import { METRICS } from "./recovery-metrics.js";
 import { DASHBOARD_HTML } from "./dashboard-ui.js";
 
@@ -74,7 +80,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 }
 
 /** Fetch the recovery-metric snapshot for one date (all metrics, one round-trip). */
-async function snapshot(date: string): Promise<unknown> {
+async function snapshot(date: string, allowRelogin = true): Promise<unknown> {
   if (!sessionExists()) {
     return { authenticated: false, date, metrics: [] };
   }
@@ -91,9 +97,12 @@ async function snapshot(date: string): Promise<unknown> {
     try {
       value = def.extract(await def.fetch(client, date));
     } catch (e) {
-      // Expired cookies: report the snapshot as unauthenticated so the UI can
-      // prompt a re-login instead of showing misleading empty tiles.
       if (isSessionExpiredError(e)) {
+        // Expired cookies: try an unattended re-login (stored credentials) and
+        // retry once; otherwise report unauthenticated so the UI prompts login.
+        if (allowRelogin && (await attemptAutoLogin())) {
+          return snapshot(date, false);
+        }
         return { authenticated: false, expired: true, date, metrics: [] };
       }
       value = null;
@@ -111,6 +120,67 @@ async function snapshot(date: string): Promise<unknown> {
 
 let loginInFlight = false;
 
+// Unattended re-login when the session expires, using stored credentials.
+// Memoized so concurrent expired requests share a single re-login attempt.
+let autoLoginInFlight: Promise<boolean> | null = null;
+function attemptAutoLogin(): Promise<boolean> {
+  if (!hasCredentials() || loginInFlight) return Promise.resolve(false);
+  if (!autoLoginInFlight) {
+    autoLoginInFlight = performAutoLogin()
+      .then(async (r) => {
+        if (r.ok) await resetSharedClient();
+        else console.error(`[auto-login] ${r.message}`);
+        return r.ok;
+      })
+      .catch((e) => {
+        console.error(
+          `[auto-login] failed: ${e instanceof Error ? e.message : e}`
+        );
+        return false;
+      });
+    // Clear the memo once settled so a later expiry can try again.
+    void autoLoginInFlight.finally(() => {
+      autoLoginInFlight = null;
+    });
+  }
+  return autoLoginInFlight;
+}
+
+interface RunResponse {
+  ok: boolean;
+  result?: unknown;
+  needsLogin?: boolean;
+  error?: string;
+}
+
+async function executeCommand(
+  cmd: CommandDef,
+  args: Record<string, unknown>,
+  allowRelogin: boolean
+): Promise<RunResponse> {
+  try {
+    const ctx = makeContext(args);
+    return { ok: true, result: await cmd.run(ctx) };
+  } catch (e) {
+    // Expired mid-request: try an unattended re-login and retry once.
+    if (
+      isSessionExpiredError(e) &&
+      allowRelogin &&
+      (await attemptAutoLogin())
+    ) {
+      return executeCommand(cmd, args, false);
+    }
+    const needsLogin =
+      (e instanceof Error && (e as { code?: string }).code === "NO_SESSION") ||
+      isSessionExpiredError(e);
+    return {
+      ok: false,
+      needsLogin,
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
 async function handleApi(
   req: IncomingMessage,
   res: ServerResponse,
@@ -123,6 +193,7 @@ async function handleApi(
       authenticated: sessionExists(),
       today: today(),
       sessionFile: getSessionFile(),
+      autoLogin: hasCredentials(),
     });
     return;
   }
@@ -190,21 +261,7 @@ async function handleApi(
       });
       return;
     }
-    try {
-      const ctx = makeContext(payload.args ?? {});
-      const result = await cmd.run(ctx);
-      sendJson(res, 200, { ok: true, result });
-    } catch (e) {
-      const needsLogin =
-        (e instanceof Error &&
-          (e as { code?: string }).code === "NO_SESSION") ||
-        isSessionExpiredError(e);
-      sendJson(res, 200, {
-        ok: false,
-        needsLogin,
-        error: e instanceof Error ? e.message : String(e),
-      });
-    }
+    sendJson(res, 200, await executeCommand(cmd, payload.args ?? {}, true));
     return;
   }
 
