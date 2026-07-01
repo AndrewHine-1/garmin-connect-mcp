@@ -7,6 +7,7 @@
 // null for dates you know have data, the path list below is the thing to edit.
 
 import type { GarminClient } from "./garmin-client.js";
+import { isSessionExpiredError } from "./garmin-client.js";
 
 export interface MetricDef {
   key: string;
@@ -165,8 +166,11 @@ export async function fetchMetricSeries(
     try {
       const raw = await metric.fetch(client, date);
       out.set(date, metric.extract(raw));
-    } catch {
-      // A failed/empty date just contributes no data point.
+    } catch (e) {
+      // An expired session is fatal for the whole series — surface it so the
+      // caller can prompt a re-login, rather than silently reporting "no data".
+      if (isSessionExpiredError(e)) throw e;
+      // Any other per-date failure just contributes no data point.
       out.set(date, null);
     }
   }

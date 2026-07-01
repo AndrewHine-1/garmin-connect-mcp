@@ -38,6 +38,29 @@ function loadSession(): SessionData {
 }
 
 /**
+ * Thrown on a 401 from Garmin — the saved cookies have expired. Distinguished
+ * from other errors so callers can prompt a re-login instead of treating it as
+ * "no data".
+ */
+export class GarminAuthError extends Error {
+  readonly code = "SESSION_EXPIRED";
+  constructor(path: string, body: string) {
+    super(`Garmin API 401 (session expired): ${path} — ${body}`);
+    this.name = "GarminAuthError";
+  }
+}
+
+/** True if an error represents an expired/invalid Garmin session (401). */
+export function isSessionExpiredError(e: unknown): boolean {
+  if (e instanceof GarminAuthError) return true;
+  return (
+    e instanceof Error &&
+    ((e as { code?: string }).code === "SESSION_EXPIRED" ||
+      /Garmin API 401/.test(e.message))
+  );
+}
+
+/**
  * Garmin Connect API client that routes requests through a headless Playwright
  * browser to bypass Cloudflare TLS fingerprinting.
  *
@@ -174,7 +197,7 @@ export class GarminClient {
       // Invalidate the singleton so the next call re-reads the session file
       _sharedClient = null;
       await this.close();
-      throw new Error(`Garmin API 401: ${path} — ${result.body}`);
+      throw new GarminAuthError(path, result.body);
     }
     if (result.status !== 200) {
       throw new Error(`Garmin API ${result.status}: ${path} — ${result.body}`);

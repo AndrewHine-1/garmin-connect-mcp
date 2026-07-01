@@ -13,6 +13,7 @@ import {
   resetSharedClient,
   getSessionFile,
   GarminClient,
+  isSessionExpiredError,
 } from "./garmin-client.js";
 import { COMMAND_MAP, serializeCommands, RunContext } from "./commands.js";
 import { performLogin } from "./dashboard-login.js";
@@ -89,7 +90,12 @@ async function snapshot(date: string): Promise<unknown> {
     let value: number | null = null;
     try {
       value = def.extract(await def.fetch(client, date));
-    } catch {
+    } catch (e) {
+      // Expired cookies: report the snapshot as unauthenticated so the UI can
+      // prompt a re-login instead of showing misleading empty tiles.
+      if (isSessionExpiredError(e)) {
+        return { authenticated: false, expired: true, date, metrics: [] };
+      }
       value = null;
     }
     metrics.push({
@@ -189,11 +195,13 @@ async function handleApi(
       const result = await cmd.run(ctx);
       sendJson(res, 200, { ok: true, result });
     } catch (e) {
-      const isNoSession =
-        e instanceof Error && (e as { code?: string }).code === "NO_SESSION";
+      const needsLogin =
+        (e instanceof Error &&
+          (e as { code?: string }).code === "NO_SESSION") ||
+        isSessionExpiredError(e);
       sendJson(res, 200, {
         ok: false,
-        needsLogin: isNoSession,
+        needsLogin,
         error: e instanceof Error ? e.message : String(e),
       });
     }

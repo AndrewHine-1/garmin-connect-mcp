@@ -251,7 +251,7 @@ export const DASHBOARD_HTML = `<!doctype html>
 <script>
 (function(){
   "use strict";
-  var S = { date:null, pinned:"training_readiness", authed:false, commands:[], selCmd:null, sessionLog:[], pending:null, journal:null, resultMode:"pretty", lastResult:null };
+  var S = { date:null, pinned:"training_readiness", authed:false, sessionExpired:false, commands:[], selCmd:null, sessionLog:[], pending:null, journal:null, resultMode:"pretty", lastResult:null };
 
   function qs(s){ return document.querySelector(s); }
   function esc(v){ return String(v==null?"":v).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c]; }); }
@@ -285,17 +285,38 @@ export const DASHBOARD_HTML = `<!doctype html>
   }
 
   // ---------- auth ----------
+  function applyAuth(){
+    var pill=qs("#authpill"), txt=qs("#authtext");
+    if(S.authed){ pill.className="pill ok"; txt.textContent="Connected"; }
+    else if(S.sessionExpired){ pill.className="pill no"; txt.textContent="Session expired — log in"; }
+    else { pill.className="pill no"; txt.textContent="Log in"; }
+    qs("#firstrun").style.display = S.authed ? "none" : "block";
+    qs("#hero").style.display = S.authed ? "flex" : "none";
+  }
+
   function refreshAuth(){
     return getJSON("/api/status").then(function(s){
-      S.authed=!!s.authenticated; S.serverToday=s.today;
+      S.serverToday=s.today;
       qs("#ft-session").textContent = "Session file: "+s.sessionFile;
-      var pill=qs("#authpill"), txt=qs("#authtext");
-      pill.className="pill "+(S.authed?"ok":"no");
-      txt.textContent = S.authed ? "Connected" : "Log in";
-      qs("#firstrun").style.display = S.authed ? "none" : "block";
-      qs("#hero").style.display = S.authed ? "flex" : "none";
+      // The status endpoint only knows the session FILE exists; if a data call
+      // already proved the cookies are expired, keep treating us as logged out.
+      S.authed = !!s.authenticated && !S.sessionExpired;
+      applyAuth();
       return S.authed;
     });
+  }
+
+  // Cookies expired mid-use: flip to logged-out and prompt a re-login instead
+  // of showing blank "Connected" data.
+  function markExpired(){
+    S.sessionExpired = true;
+    S.authed = false;
+    applyAuth();
+    qs("#tiles").innerHTML='<div class="muted">Your Garmin session expired. Click <b>“Session expired — log in”</b> at the top right to reconnect.</div>';
+    qs("#analyzecard").innerHTML='<div class="muted">Log in again to refresh your recovery insights.</div>';
+    renderRing(null);
+    qs("#coachline").textContent="Session expired.";
+    qs("#coachsub").textContent="Reconnect to Garmin to see today’s recovery.";
   }
 
   function openLogin(){
@@ -306,6 +327,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       pill.className="pill "+(res&&res.ok?"ok":"no");
       qs("#modalstatus").textContent = (res&&(res.message|| (res.ok?"Connected!":"Login did not complete."))) || "Login finished.";
       if(res && res.ok){
+        S.sessionExpired = false;
         setTimeout(function(){ qs("#modalbg").classList.remove("show"); }, 900);
         refreshAuth().then(function(){ loadAll(); var p=S.pending; S.pending=null; if(p){ run(p.command,p.args,p.onResult); } });
       }
@@ -352,6 +374,8 @@ export const DASHBOARD_HTML = `<!doctype html>
   function loadSnapshot(){
     renderRing(null);
     return getJSON("/api/snapshot?date="+encodeURIComponent(S.date)).then(function(snap){
+      if(snap && snap.busy){ return; }
+      if(snap && snap.authenticated===false){ markExpired(); return; }
       var byKey={}; (snap.metrics||[]).forEach(function(m){ byKey[m.key]=m; });
       var rdy = byKey.training_readiness ? byKey.training_readiness.value : null;
       renderRing(rdy);
@@ -629,8 +653,12 @@ export const DASHBOARD_HTML = `<!doctype html>
   // ---------- orchestration ----------
   function loadAll(){
     loadJournalThen(function(){ renderLogger(); renderHistory(); });
-    if(S.authed){ loadSnapshot(); loadAnalysis(); }
-    else {
+    if(S.authed){
+      // Load the snapshot first; if it detects an expired session it flips us to
+      // logged-out, so only run the analysis (which would otherwise pop the
+      // login modal) when we're still authenticated.
+      loadSnapshot().then(function(){ if(S.authed) loadAnalysis(); });
+    } else {
       qs("#tiles").innerHTML='<div class="muted">Log in to Garmin to load your recovery metrics.</div>';
       qs("#analyzecard").innerHTML='<div class="muted">Log in to Garmin, then log a few habit days, to see what moves your recovery.</div>';
     }
