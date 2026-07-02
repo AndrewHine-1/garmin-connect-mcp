@@ -31,12 +31,30 @@ const sleep = (ms: number): Promise<void> =>
 
 const AUTH_COOKIE_RE = /SESSIONID|GARMIN-SSO|JWT_FGP|GARMIN-SSO-CUST-GUID/i;
 
-const CSRF_EVAL =
-  "() => document.querySelector('meta[name=\"csrf-token\"]')?.content ?? null";
+// Read the CSRF token from the page. IMPORTANT: pass a real function to
+// page.evaluate — a STRING like "() => ..." is evaluated as an expression that
+// returns the function itself (serialized to undefined), which is why the token
+// used to come back empty and every data request 403'd.
+function readCsrfToken(page: any): Promise<string | null> {
+  return page
+    .evaluate(() => {
+      const m = document.querySelector('meta[name="csrf-token"]');
+      return m ? m.getAttribute("content") : null;
+    })
+    .catch(() => null);
+}
 
 // True if the page is showing a 2FA / verification-code step.
-const MFA_EVAL =
-  '() => !!document.querySelector(\'input[autocomplete="one-time-code"], input[name*="code" i], input[name*="mfa" i], input[name*="verif" i]\')';
+function hasMfaPrompt(page: any): Promise<boolean> {
+  return page
+    .evaluate(
+      () =>
+        !!document.querySelector(
+          'input[autocomplete="one-time-code"], input[name*="code" i], input[name*="mfa" i], input[name*="verif" i]'
+        )
+    )
+    .catch(() => false);
+}
 
 class MfaRequiredError extends Error {
   constructor() {
@@ -106,9 +124,8 @@ async function captureSession(
       url.includes("signin") ||
       url.includes("sign-in")
     ) {
-      if (detectMfa) {
-        const mfa = await page.evaluate(MFA_EVAL).catch(() => false);
-        if (mfa) throw new MfaRequiredError();
+      if (detectMfa && (await hasMfaPrompt(page))) {
+        throw new MfaRequiredError();
       }
       continue;
     }
@@ -122,17 +139,20 @@ async function captureSession(
     if (!hasAuth) continue; // on connect.* but not authenticated yet
 
     // Logged in. The post-SSO landing page often doesn't carry the CSRF <meta>
-    // yet, so do one clean load of the activities page to capture it. The token
-    // is best-effort (GET calls work without it), so don't fail if it's absent.
-    csrf = await page.evaluate(CSRF_EVAL).catch(() => null);
+    // yet, so do one clean load of the activities page to capture it. The CSRF
+    // token IS required — Garmin's data endpoints return 403 without it.
+    csrf = await readCsrfToken(page);
     if (!csrf) {
       try {
         await page.goto("https://connect.garmin.com/app/activities", {
           waitUntil: "domcontentloaded",
           timeout: 30000,
         });
-        await sleep(2000);
-        csrf = await page.evaluate(CSRF_EVAL).catch(() => null);
+        // Poll briefly — the SPA injects the <meta> a moment after load.
+        for (let t = 0; t < 6 && !csrf; t++) {
+          await sleep(1500);
+          csrf = await readCsrfToken(page);
+        }
         cookies = await context.cookies().catch(() => cookies);
       } catch {
         /* proceed with whatever we captured */
