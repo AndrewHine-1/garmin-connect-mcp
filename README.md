@@ -236,6 +236,30 @@ Config: `GARMIN_DASHBOARD_PORT` (default `8765`), `GARMIN_DASHBOARD_NO_OPEN=1` t
 auto-opening the browser. Data and session live in `~/.garmin-connect-mcp/`, shared with
 the MCP server — so logging a habit in the dashboard shows up for Claude too.
 
+### Coach (readiness-aware workouts → intervals.icu)
+
+The Coach section turns the morning's Garmin stats into the day's training:
+
+1. **Set your training block** (base / build / peak / taper / recovery) — persisted in
+   `~/.garmin-connect-mcp/coach-settings.json` and overwritten on each save.
+2. **Pick today's sport(s)** — Run, Trail Run, Bike, Swim, Lift — in priority order.
+   The first sport gets the readiness-driven session; later ones are stepped down an
+   intensity level so the combined day stays absorbable.
+3. **Generate** — readiness (or sleep score as fallback) maps to a tier:
+   ≥67 → quality session (flavor set by your block: tempo/sweet-spot in base,
+   threshold in build, VO2/race-pace in peak, openers in taper), 34–66 → steady
+   endurance, <34 → recovery. Each card shows the workout in intervals.icu text
+   (run %LTHR, bike %FTP, swim distance steps, lifting timed blocks) plus the
+   coach rationale referencing your actual overnight numbers.
+4. **Send to intervals.icu** — one click per workout (or send all) creates planned
+   workout events on your calendar for the selected date; the text parses into
+   structured steps and syncs wherever intervals.icu pushes.
+
+Connect intervals.icu once in the section's settings (athlete ID, e.g. `i599755`,
+and an API key from intervals.icu → Settings → Developer). Command console
+equivalents: `get-coach-settings`, `set-coach-settings`, `generate-workouts`,
+`export-workouts-icu`.
+
 ### Automatic login (optional, unattended)
 
 Garmin web sessions expire after a few hours, so the manual browser login recurs. If you

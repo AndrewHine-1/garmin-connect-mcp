@@ -81,6 +81,20 @@ export const DASHBOARD_HTML = `<!doctype html>
   .savetag { font-size:11px; color:var(--good); opacity:0; transition:opacity .2s; }
   .savetag.show { opacity:1; }
 
+  /* coach */
+  .coachrow { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .chip { padding:6px 12px; border-radius:999px; border:1px solid var(--line); background:transparent; color:var(--text2); font-size:12px; cursor:pointer; }
+  .chip.on { background:rgba(31,169,140,.16); border-color:var(--accent); color:var(--accent); }
+  .chip.on .ord { font-weight:700; margin-right:4px; }
+  .wcard { border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-top:12px; background:var(--panel); }
+  .wcard .whead { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .wcard .wname { font-weight:600; }
+  .wcard .wdur { color:var(--text2); font-size:12px; }
+  .wcard pre { font-family:var(--mono); font-size:12px; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; white-space:pre-wrap; margin:8px 0; }
+  .wcard .wrat { font-size:12px; color:var(--text2); margin:6px 0; }
+  .sent { color:var(--good); font-size:12px; }
+
   /* tiles */
   .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
   .tile { cursor:pointer; position:relative; }
@@ -198,6 +212,31 @@ export const DASHBOARD_HTML = `<!doctype html>
       </div>
     </div>
 
+    <!-- COACH -->
+    <h2 class="section">Coach <span class="muted" id="coachdate"></span></h2>
+    <div class="card">
+      <div class="coachrow">
+        <div class="formrow" style="margin:0">
+          <label>Training block <span class="muted" style="text-transform:none;letter-spacing:0">· saved</span></label>
+          <select id="coach-block"></select>
+        </div>
+        <div class="formrow" style="margin:0; flex:1">
+          <label>Today&#39;s workout(s) <span class="muted" style="text-transform:none;letter-spacing:0">· pick in priority order</span></label>
+          <div class="chips" id="sportchips"></div>
+        </div>
+        <button class="primary" id="coach-generate">Generate</button>
+      </div>
+      <div id="coach-out"></div>
+      <details style="margin-top:12px">
+        <summary class="muted" style="cursor:pointer; font-size:12px">intervals.icu connection <span id="icu-state"></span></summary>
+        <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; align-items:flex-end">
+          <div class="formrow" style="margin:0"><label>Athlete ID</label><input id="icu-id" placeholder="i123456" style="width:110px" /></div>
+          <div class="formrow" style="margin:0"><label>API key</label><input id="icu-key" type="password" placeholder="unchanged" style="width:200px" /></div>
+          <button id="icu-save">Save</button>
+        </div>
+      </details>
+    </div>
+
     <!-- RECOVERY TILES -->
     <h2 class="section">Recovery glance <span class="muted">· click a tile to correlate habits against it</span></h2>
     <div class="tiles" id="tiles"><div class="muted">Loading…</div></div>
@@ -251,7 +290,7 @@ export const DASHBOARD_HTML = `<!doctype html>
 <script>
 (function(){
   "use strict";
-  var S = { date:null, pinned:"training_readiness", authed:false, sessionExpired:false, autoLogin:false, commands:[], selCmd:null, sessionLog:[], pending:null, journal:null, resultMode:"pretty", lastResult:null };
+  var S = { date:null, pinned:"training_readiness", authed:false, sessionExpired:false, autoLogin:false, commands:[], selCmd:null, sessionLog:[], pending:null, journal:null, resultMode:"pretty", lastResult:null, coach:{ settings:null, selected:[], workouts:null, forDate:null } };
 
   function qs(s){ return document.querySelector(s); }
   function esc(v){ return String(v==null?"":v).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c]; }); }
@@ -651,6 +690,106 @@ export const DASHBOARD_HTML = `<!doctype html>
     });
   }
 
+  // ---------- coach ----------
+  var SPORT_LABEL = { running:"Run", trail_running:"Trail Run", biking:"Bike", swimming:"Swim", weightlifting:"Lift" };
+
+  function loadCoach(){
+    run("get-coach-settings", {}, function(res){
+      if(!res || !res.ok) return;
+      S.coach.settings = res.result;
+      renderCoachControls();
+    });
+  }
+
+  function renderCoachControls(){
+    var st = S.coach.settings; if(!st) return;
+    var sel = qs("#coach-block");
+    sel.innerHTML = st.blocks.map(function(b){ return '<option value="'+esc(b)+'"'+(b===st.block?' selected':'')+'>'+esc(b)+'</option>'; }).join("");
+    var chips = qs("#sportchips");
+    chips.innerHTML = st.sports.map(function(sp){
+      var idx = S.coach.selected.indexOf(sp);
+      var on = idx >= 0;
+      return '<button class="chip'+(on?' on':'')+'" data-sport="'+esc(sp)+'">'+(on?'<span class="ord">'+(idx+1)+'</span>':'')+esc(SPORT_LABEL[sp]||sp)+'</button>';
+    }).join("");
+    Array.prototype.forEach.call(chips.querySelectorAll(".chip"), function(c){
+      c.addEventListener("click", function(){
+        var sp = c.getAttribute("data-sport");
+        var i = S.coach.selected.indexOf(sp);
+        if(i>=0) S.coach.selected.splice(i,1); else S.coach.selected.push(sp);
+        renderCoachControls();
+      });
+    });
+    qs("#icu-state").textContent = st.icuConfigured ? "· connected ✓" : "· not configured";
+    if(document.activeElement !== qs("#icu-id")) qs("#icu-id").value = st.icuAthleteId || "";
+  }
+
+  function saveBlock(){
+    run("set-coach-settings", { block: qs("#coach-block").value }, function(res){
+      if(res && res.ok){ toast("Training block saved: "+res.result.saved.block); if(S.coach.settings) S.coach.settings.block = res.result.saved.block; }
+    });
+  }
+
+  function saveIcu(){
+    var args = {};
+    var id = qs("#icu-id").value.trim();
+    var k = qs("#icu-key").value.trim();
+    if(id) args.icuAthleteId = id;
+    if(k) args.icuApiKey = k;
+    if(!id && !k){ toast("Nothing to save"); return; }
+    run("set-coach-settings", args, function(res){
+      if(res && res.ok){ toast("intervals.icu settings saved"); qs("#icu-key").value=""; loadCoach(); }
+      else { toast((res&&res.error)||"Could not save"); }
+    });
+  }
+
+  function generateCoach(){
+    if(!S.coach.selected.length){ toast("Pick at least one sport first"); return; }
+    qs("#coach-out").innerHTML = '<div class="muted" style="margin-top:10px">Reading your overnight Garmin stats and building workouts…</div>';
+    run("generate-workouts", { sports: S.coach.selected.join(","), date: S.date }, function(res){
+      if(!res || !res.ok){
+        if(res && res.needsLogin){ qs("#coach-out").innerHTML='<div class="muted" style="margin-top:10px">Log in to Garmin first — workouts are scaled to your overnight readiness.</div>'; return; }
+        qs("#coach-out").innerHTML = '<div class="muted" style="margin-top:10px">'+esc((res&&res.error)||"Could not generate.")+'</div>'; return;
+      }
+      S.coach.workouts = res.result.workouts;
+      S.coach.forDate = res.result.date;
+      renderWorkouts(res.result);
+    });
+  }
+
+  function renderWorkouts(d){
+    var html = '<div class="muted" style="margin-top:10px; font-size:12px">'+esc(d.readiness.summary)+' · block: <b style="color:var(--accent)">'+esc(d.block)+'</b></div>';
+    html += d.workouts.map(function(w,i){
+      return '<div class="wcard"><div class="whead"><span class="wname">'+esc(w.name)+'</span><span class="wdur">~'+w.durationMin+' min · '+esc(w.icuType)+'</span><span class="spacer"></span><button data-send="'+i+'">Send to intervals.icu</button><span class="sent" id="sent-'+i+'"></span></div>'
+        + '<pre>'+esc(w.description)+'</pre></div>';
+    }).join("");
+    if(d.workouts.length>1) html += '<div style="margin-top:10px"><button class="primary" id="sendall">Send all to intervals.icu</button></div>';
+    qs("#coach-out").innerHTML = html;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-send]"), function(b){
+      b.addEventListener("click", function(){ sendWorkouts([parseInt(b.getAttribute("data-send"),10)]); });
+    });
+    var sa = qs("#sendall");
+    if(sa) sa.onclick = function(){ sendWorkouts(S.coach.workouts.map(function(_,i){ return i; })); };
+  }
+
+  function sendWorkouts(indices){
+    var ws = indices.map(function(i){ return S.coach.workouts[i]; });
+    indices.forEach(function(i){ var el=qs("#sent-"+i); if(el) el.textContent="sending…"; });
+    run("export-workouts-icu", { workouts: JSON.stringify(ws), date: S.coach.forDate || S.date }, function(res){
+      if(!res || !res.ok){
+        indices.forEach(function(i){ var el=qs("#sent-"+i); if(el) el.textContent=""; });
+        toast((res&&res.error)||"Export failed"); return;
+      }
+      var results = res.result.results;
+      results.forEach(function(r){
+        var idx = S.coach.workouts.findIndex(function(w){ return w.name===r.name; });
+        var el = idx>=0 ? qs("#sent-"+idx) : null;
+        if(el) el.textContent = r.ok ? ("✓ on calendar ("+r.parsedSteps+" steps)") : ("✗ "+(r.error||"failed"));
+      });
+      var okCount = results.filter(function(r){ return r.ok; }).length;
+      toast(okCount+"/"+results.length+" workout(s) sent to intervals.icu");
+    });
+  }
+
   // ---------- orchestration ----------
   function loadAll(){
     loadJournalThen(function(){ renderLogger(); renderHistory(); });
@@ -665,7 +804,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     }
   }
 
-  function setDate(d){ S.date=d; qs("#dinput").value=d; qs("#loggerdate").textContent = d===todayISO()?"(today)":("("+d+")"); renderLogger(); if(S.authed){ loadSnapshot(); } }
+  function setDate(d){ S.date=d; qs("#dinput").value=d; qs("#loggerdate").textContent = d===todayISO()?"(today)":("("+d+")"); qs("#coachdate").textContent = "· workouts for "+(d===todayISO()?"today":d); renderLogger(); if(S.authed){ loadSnapshot(); } }
 
   function init(){
     S.date=todayISO();
@@ -678,6 +817,11 @@ export const DASHBOARD_HTML = `<!doctype html>
     qs("#firstlogin").onclick=openLogin;
     qs("#modalclose").onclick=function(){ qs("#modalbg").classList.remove("show"); };
     qs("#nh-add").onclick=addHabit;
+    qs("#coach-block").onchange=saveBlock;
+    qs("#coach-generate").onclick=generateCoach;
+    qs("#icu-save").onclick=saveIcu;
+    qs("#coachdate").textContent="· workouts for today";
+    loadCoach();
     qs("#cmdrun").onclick=runConsole;
     qs("#cmdsearch").oninput=function(){ renderCmdList(qs("#cmdsearch").value); };
     qs("#ft-server").textContent="Server: "+location.host;

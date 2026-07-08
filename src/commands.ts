@@ -25,6 +25,18 @@ import {
   metricFetchDates,
 } from "./recovery-metrics.js";
 import { analyzeHabit, formatDetailed } from "./analysis.js";
+import {
+  loadCoachSettings,
+  saveCoachSettings,
+  assessReadiness,
+  generateWorkouts,
+  parseSports,
+  pushWorkoutToIcu,
+  TRAINING_BLOCKS,
+  SPORTS,
+  TrainingBlock,
+  GeneratedWorkout,
+} from "./coach.js";
 
 export type ParamType = "string" | "number" | "boolean" | "date" | "enum";
 
@@ -804,6 +816,113 @@ export const COMMANDS: CommandDef[] = [
         metricCoverage: coverage,
         results,
       };
+    },
+  },
+
+  // Coach (readiness-aware workout generation + intervals.icu export)
+  {
+    name: "get-coach-settings",
+    group: "Coach",
+    description:
+      "Current coaching settings: training block and intervals.icu connection state",
+    needsAuth: false,
+    params: [],
+    run: async () => {
+      const s = loadCoachSettings();
+      return {
+        block: s.block,
+        blocks: TRAINING_BLOCKS,
+        sports: SPORTS,
+        icuAthleteId: s.icuAthleteId,
+        icuConfigured: Boolean(s.icuAthleteId && s.icuApiKey),
+      };
+    },
+  },
+  {
+    name: "set-coach-settings",
+    group: "Coach",
+    description:
+      "Save coaching settings (overwrites each time). Only provided fields change.",
+    needsAuth: false,
+    params: [
+      {
+        name: "block",
+        type: "enum",
+        required: false,
+        enumValues: [...TRAINING_BLOCKS],
+        description: "Training block you're currently in",
+      },
+      { name: "icuAthleteId", type: "string", required: false },
+      { name: "icuApiKey", type: "string", required: false },
+    ],
+    run: async (ctx) => {
+      const s = saveCoachSettings({
+        block: optStr(ctx, "block") as TrainingBlock | undefined,
+        icuAthleteId: optStr(ctx, "icuAthleteId"),
+        icuApiKey: optStr(ctx, "icuApiKey"),
+      });
+      return {
+        saved: {
+          block: s.block,
+          icuAthleteId: s.icuAthleteId,
+          icuConfigured: Boolean(s.icuAthleteId && s.icuApiKey),
+        },
+      };
+    },
+  },
+  {
+    name: "generate-workouts",
+    group: "Coach",
+    description:
+      "Generate a workout per selected sport, scaled to today's Garmin readiness and your training block",
+    needsAuth: true,
+    params: [
+      {
+        name: "sports",
+        type: "string",
+        required: true,
+        description: `Comma-separated, in priority order: ${SPORTS.join(", ")}`,
+      },
+      P_DATE,
+    ],
+    run: async (ctx) => {
+      const sports = parseSports(reqStr(ctx, "sports"));
+      const date = dateArg(ctx);
+      const settings = loadCoachSettings();
+      const readiness = await assessReadiness(ctx.requireClient(), date);
+      const workouts = generateWorkouts(sports, settings.block, readiness);
+      return { date, block: settings.block, readiness, workouts };
+    },
+  },
+  {
+    name: "export-workouts-icu",
+    group: "Coach",
+    description:
+      "Push generated workouts to the intervals.icu calendar (pass the workouts JSON from generate-workouts)",
+    needsAuth: false,
+    params: [
+      {
+        name: "workouts",
+        type: "string",
+        required: true,
+        description: "JSON array of workouts from generate-workouts",
+      },
+      { name: "date", type: "date", required: true },
+    ],
+    run: async (ctx) => {
+      const settings = loadCoachSettings();
+      const date = reqStr(ctx, "date");
+      const workouts = JSON.parse(
+        reqStr(ctx, "workouts")
+      ) as GeneratedWorkout[];
+      if (!Array.isArray(workouts) || workouts.length === 0) {
+        throw new Error("workouts must be a non-empty JSON array");
+      }
+      const results = [];
+      for (const w of workouts) {
+        results.push(await pushWorkoutToIcu(settings, date, w));
+      }
+      return { date, results };
     },
   },
 ];
