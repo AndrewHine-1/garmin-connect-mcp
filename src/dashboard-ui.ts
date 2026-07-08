@@ -760,6 +760,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     var html = '<div class="muted" style="margin-top:10px; font-size:12px">'+esc(d.readiness.summary)+' · block: <b style="color:var(--accent)">'+esc(d.block)+'</b></div>';
     html += d.workouts.map(function(w,i){
       return '<div class="wcard"><div class="whead"><span class="wname">'+esc(w.name)+'</span><span class="wdur">~'+w.durationMin+' min · '+esc(w.icuType)+'</span><span class="spacer"></span><button data-send="'+i+'">Send to intervals.icu</button><span class="sent" id="sent-'+i+'"></span></div>'
+        + '<div class="wrat">'+esc(w.rationale)+'</div>'
         + '<pre>'+esc(w.description)+'</pre></div>';
     }).join("");
     if(d.workouts.length>1) html += '<div style="margin-top:10px"><button class="primary" id="sendall">Send all to intervals.icu</button></div>';

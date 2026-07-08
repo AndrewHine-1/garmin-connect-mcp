@@ -168,16 +168,41 @@ export interface GeneratedWorkout {
   rationale: string;
 }
 
+// A workout is a list of blocks. A block is either a single named step line
+// (e.g. "Warmup 15m 65-75% LTHR") or a repeat (rendered as "Name Nx" + `- child`
+// lines). The set name is the ONLY text on a step besides the structured
+// duration/target — no prose notes.
+interface Rep {
+  name: string;
+  n: number;
+  children: string[];
+}
+type Block = string | Rep;
+
 interface Session {
   title: string;
   durationMin: number;
-  body: string; // step text, no trailing newline
+  blocks: Block[];
 }
 
-// Repeat blocks follow the intervals.icu format the user standardized on:
-// blank line BEFORE the `Nx` header, none between it and its first step.
-function rep(n: number, ...steps: string[]): string {
-  return `${n}x\n${steps.map((s) => `- ${s}`).join("\n")}`;
+function rep(name: string, n: number, children: string[]): Rep {
+  return { name, n, children };
+}
+
+// intervals.icu syntax (per the official quick guide):
+//  - a step is "[name] duration|distance [target] [cadence]"; text before the
+//    first duration is the step's name/cue.
+//  - repeats are "Name Nx" then "- child" lines, with one empty line before AND
+//    after the block. Joining every block with a blank line guarantees that.
+//  - "m" means minutes; meters must be written "mtr".
+function renderWorkout(blocks: Block[]): string {
+  return blocks
+    .map((b) =>
+      typeof b === "string"
+        ? `- ${b}` // top-level steps need the leading dash to parse
+        : `${b.name} ${b.n}x\n${b.children.map((c) => `- ${c}`).join("\n")}`
+    )
+    .join("\n\n");
 }
 
 /** The tier each sport actually trains at, given day position + readiness. */
@@ -188,457 +213,376 @@ function effectiveTier(tier: ReadinessTier, slot: number): ReadinessTier {
 }
 
 function runSession(block: TrainingBlock, tier: ReadinessTier): Session {
-  if (tier === "low") {
+  if (tier === "low")
     return {
       title: "Recovery Jog",
       durationMin: 35,
-      body: "- 35m 60-70% LTHR relaxed, walk breaks fine",
+      blocks: ["Recovery Jog 35m 60-70% LTHR"],
     };
-  }
-  if (tier === "medium") {
+  if (tier === "medium")
     return {
       title: "Aerobic Endurance + Strides",
       durationMin: 55,
-      body: `Warmup
-- 10m 65-72% LTHR
-
-Main
-- 35m 72-80% LTHR steady
-
-${rep(4, "20s 95% LTHR stride, tall and quick", "70s easy jog")}
-
-Cooldown
-- 4m 60-68% LTHR`,
+      blocks: [
+        "Warmup 10m 65-72% LTHR",
+        "Endurance 35m 72-80% LTHR",
+        rep("Strides", 4, ["Stride 20s 95% LTHR", "Easy 70s 60-68% LTHR"]),
+        "Cooldown 4m 60-68% LTHR",
+      ],
     };
-  }
-  // high — quality flavored by block
   switch (block) {
     case "base":
       return {
         title: "Tempo Run",
         durationMin: 60,
-        body: `Warmup
-- 15m ramp 62-75% LTHR
-
-${rep(2, "15m 88-93% LTHR tempo", "5m 65% LTHR float")}
-
-Cooldown
-- 5m 60-68% LTHR`,
+        blocks: [
+          "Warmup 15m 62-75% LTHR",
+          rep("Tempo", 2, ["Tempo 15m 88-93% LTHR", "Float 5m 65% LTHR"]),
+          "Cooldown 5m 60-68% LTHR",
+        ],
       };
     case "build":
       return {
         title: "Threshold Intervals",
         durationMin: 62,
-        body: `Warmup
-- 15m ramp 62-78% LTHR
-
-${rep(4, "8m 98-103% LTHR", "3m 62-70% LTHR jog")}
-
-Cooldown
-- 5m 60-68% LTHR`,
+        blocks: [
+          "Warmup 15m 62-78% LTHR",
+          rep("Threshold", 4, ["Hard 8m 98-103% LTHR", "Jog 3m 62-70% LTHR"]),
+          "Cooldown 5m 60-68% LTHR",
+        ],
       };
     case "peak":
       return {
-        title: "VO2 / Race-Pace Sharpener",
+        title: "VO2 Intervals",
         durationMin: 55,
-        body: `Warmup
-- 15m ramp 62-80% LTHR
-
-${rep(5, "4m 104-110% LTHR strong", "3m 62% LTHR jog")}
-
-Cooldown
-- 5m 60-68% LTHR`,
+        blocks: [
+          "Warmup 15m 62-80% LTHR",
+          rep("VO2", 5, ["Hard 4m 104-110% LTHR", "Jog 3m 62% LTHR"]),
+          "Cooldown 5m 60-68% LTHR",
+        ],
       };
     case "taper":
       return {
         title: "Taper Openers",
         durationMin: 40,
-        body: `Warmup
-- 12m 65-75% LTHR
-
-${rep(4, "90s 100-105% LTHR crisp", "2m 62% LTHR jog")}
-
-Cooldown
-- 8m 60-68% LTHR`,
+        blocks: [
+          "Warmup 12m 65-75% LTHR",
+          rep("Openers", 4, ["Quick 90s 100-105% LTHR", "Jog 2m 62% LTHR"]),
+          "Cooldown 8m 60-68% LTHR",
+        ],
       };
     case "recovery":
       return {
         title: "Easy Aerobic Run",
         durationMin: 40,
-        body: "- 40m 62-72% LTHR conversational",
+        blocks: ["Easy Run 40m 62-72% LTHR"],
       };
   }
 }
 
 function trailSession(block: TrainingBlock, tier: ReadinessTier): Session {
-  if (tier === "low") {
+  if (tier === "low")
     return {
       title: "Easy Trail Shakeout",
       durationMin: 40,
-      body: "- 40m 60-72% LTHR easy trail, hike the steep bits",
+      blocks: ["Easy Trail 40m 60-72% LTHR"],
     };
-  }
-  if (tier === "medium") {
+  if (tier === "medium")
     return {
       title: "Rolling Trail Endurance",
       durationMin: 70,
-      body: `Warmup
-- 10m 65-72% LTHR easy trail
-
-Main
-- 55m 72-82% LTHR rolling terrain, steady effort not pace
-
-Cooldown
-- 5m 60-68% LTHR`,
+      blocks: [
+        "Warmup 10m 65-72% LTHR",
+        "Rolling Endurance 55m 72-82% LTHR",
+        "Cooldown 5m 60-68% LTHR",
+      ],
     };
-  }
   switch (block) {
     case "base":
       return {
         title: "Hilly Steady State",
         durationMin: 75,
-        body: `Warmup
-- 15m 65-75% LTHR
-
-Main
-- 50m 78-86% LTHR hilly trail, even effort up and over the top
-
-Cooldown
-- 10m 60-70% LTHR`,
+        blocks: [
+          "Warmup 15m 65-75% LTHR",
+          "Hilly Steady State 50m 78-86% LTHR",
+          "Cooldown 10m 60-70% LTHR",
+        ],
       };
     case "build":
       return {
         title: "Hill Repeats",
         durationMin: 65,
-        body: `Warmup
-- 15m ramp 62-78% LTHR to the climb
-
-${rep(7, "3m 98-106% LTHR strong uphill, drive the arms", "3m easy jog/walk back down")}
-
-Cooldown
-- 8m 60-70% LTHR`,
+        blocks: [
+          "Warmup 15m 62-78% LTHR",
+          rep("Hill Repeats", 7, [
+            "Uphill 3m 98-106% LTHR",
+            "Down 3m 55-65% LTHR",
+          ]),
+          "Cooldown 8m 60-70% LTHR",
+        ],
       };
     case "peak":
       return {
-        title: "Race-Sim Surges",
+        title: "Rolling Surges",
         durationMin: 60,
-        body: `Warmup
-- 15m ramp 62-78% LTHR
-
-Main
-- 30m 80-88% LTHR with a 45s surge to 105% LTHR every 5m — practice rough-terrain rhythm changes
-
-Cooldown
-- 10m 60-70% LTHR`,
+        blocks: [
+          "Warmup 15m 62-78% LTHR",
+          rep("Surges", 6, [
+            "Surge 45s 100-106% LTHR",
+            "Steady 4m15s 80-88% LTHR",
+          ]),
+          "Cooldown 10m 60-70% LTHR",
+        ],
       };
     case "taper":
       return {
         title: "Short Trail + Pickups",
         durationMin: 40,
-        body: `Warmup
-- 15m 65-75% LTHR easy trail
-
-${rep(3, "60s 100% LTHR pickup on runnable ground", "3m easy")}
-
-Cooldown
-- 8m 60-68% LTHR`,
+        blocks: [
+          "Warmup 15m 65-75% LTHR",
+          rep("Pickups", 3, ["Pickup 60s 100% LTHR", "Easy 3m 60-68% LTHR"]),
+          "Cooldown 8m 60-68% LTHR",
+        ],
       };
     case "recovery":
       return {
         title: "Easy Trail Run",
         durationMin: 45,
-        body: "- 45m 62-72% LTHR soft surfaces, enjoy it",
+        blocks: ["Easy Trail Run 45m 62-72% LTHR"],
       };
   }
 }
 
 function bikeSession(block: TrainingBlock, tier: ReadinessTier): Session {
-  if (tier === "low") {
+  if (tier === "low")
     return {
       title: "Recovery Spin",
       durationMin: 40,
-      body: "- 40m 45-55% FTP high cadence, flat route",
+      blocks: ["Recovery Spin 40m 45-55%"],
     };
-  }
-  if (tier === "medium") {
+  if (tier === "medium")
     return {
       title: "Endurance + Tempo",
       durationMin: 75,
-      body: `Warmup
-- 10m ramp 50-65% FTP
-
-${rep(2, "20m 76-84% FTP tempo, smooth cadence 85-95rpm", "5m 55% FTP easy")}
-
-Cooldown
-- 10m 50-60% FTP`,
+      blocks: [
+        "Warmup 10m ramp 50%-65%",
+        rep("Tempo", 2, ["Tempo 20m 76-84%", "Easy 5m 55%"]),
+        "Cooldown 10m 50-60%",
+      ],
     };
-  }
   switch (block) {
     case "base":
       return {
         title: "Sweet Spot Intervals",
         durationMin: 80,
-        body: `Warmup
-- 15m ramp 50-70% FTP
-
-${rep(3, "12m 88-93% FTP", "5m 55% FTP easy")}
-
-Cooldown
-- 10m 50-60% FTP`,
+        blocks: [
+          "Warmup 15m ramp 50%-70%",
+          rep("Sweet Spot", 3, ["Work 12m 88-93%", "Easy 5m 55%"]),
+          "Cooldown 10m 50-60%",
+        ],
       };
     case "build":
       return {
         title: "Threshold Intervals",
         durationMin: 78,
-        body: `Warmup
-- 15m ramp 50-75% FTP with 3x30s @ 100% FTP
-
-${rep(4, "8m 98-104% FTP", "4m 55% FTP easy")}
-
-Cooldown
-- 10m 50-60% FTP`,
+        blocks: [
+          "Warmup 15m ramp 50%-75%",
+          rep("Threshold", 4, ["Work 8m 98-104%", "Easy 4m 55%"]),
+          "Cooldown 10m 50-60%",
+        ],
       };
     case "peak":
       return {
         title: "VO2 Intervals",
         durationMin: 65,
-        body: `Warmup
-- 15m ramp 50-75% FTP with 3x30s @ 105% FTP
-
-${rep(5, "3m 110-118% FTP", "3m 50% FTP very easy")}
-
-Cooldown
-- 10m 50-60% FTP`,
+        blocks: [
+          "Warmup 15m ramp 50%-75%",
+          rep("VO2", 5, ["Hard 3m 110-118%", "Easy 3m 50%"]),
+          "Cooldown 10m 50-60%",
+        ],
       };
     case "taper":
       return {
         title: "Taper Openers",
         durationMin: 45,
-        body: `Warmup
-- 15m ramp 50-70% FTP
-
-${rep(3, "2m 100-105% FTP crisp", "4m 55% FTP easy")}
-
-Cooldown
-- 10m 50-60% FTP`,
+        blocks: [
+          "Warmup 15m ramp 50%-70%",
+          rep("Openers", 3, ["Crisp 2m 100-105%", "Easy 4m 55%"]),
+          "Cooldown 10m 50-60%",
+        ],
       };
     case "recovery":
       return {
         title: "Easy Endurance Spin",
         durationMin: 60,
-        body: "- 60m 55-68% FTP steady, comfortable cadence",
+        blocks: ["Easy Spin 60m 55-68%"],
       };
   }
 }
 
 function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
-  if (tier === "low") {
+  if (tier === "low")
     return {
       title: "Technique Swim",
       durationMin: 35,
-      body: `Warmup
-- 300m easy free
-
-Drills
-${rep(6, "50m drill (catch-up / fingertip drag), 15s rest")}
-
-Main
-- 400m smooth free, focus on long stroke
-
-Cooldown
-- 100m easy choice`,
+      blocks: [
+        "Warmup 300mtr",
+        rep("Catch-Up Drill", 6, ["Drill 50mtr", "Rest 15s"]),
+        "Smooth Free 400mtr",
+        "Cooldown 100mtr",
+      ],
     };
-  }
-  if (tier === "medium") {
+  if (tier === "medium")
     return {
       title: "Aerobic Endurance Swim",
       durationMin: 50,
-      body: `Warmup
-- 300m easy free
-- 4x50m build, 15s rest
-
-Main
-${rep(4, "400m steady free, 30s rest — hold even splits")}
-
-Cooldown
-- 200m easy choice`,
+      blocks: [
+        "Warmup 300mtr",
+        rep("Build", 4, ["Swim 50mtr", "Rest 15s"]),
+        rep("Endurance", 4, ["Free 400mtr", "Rest 30s"]),
+        "Cooldown 200mtr",
+      ],
     };
-  }
   switch (block) {
     case "base":
       return {
         title: "Aerobic Intervals",
         durationMin: 55,
-        body: `Warmup
-- 400m easy free
-- 4x50m drill/swim, 15s rest
-
-Main
-${rep(10, "100m moderate free, 15s rest — consistent pace")}
-
-Pull
-- 300m pull buoy, strong catch
-
-Cooldown
-- 200m easy choice`,
+        blocks: [
+          "Warmup 400mtr",
+          rep("Drills", 4, ["Drill 50mtr", "Rest 15s"]),
+          rep("Aerobic", 10, ["Free 100mtr", "Rest 15s"]),
+          "Pull 300mtr",
+          "Cooldown 200mtr",
+        ],
       };
     case "build":
       return {
         title: "Threshold 200s",
         durationMin: 60,
-        body: `Warmup
-- 400m easy free
-- 4x50m build, 15s rest
-
-Main
-${rep(5, "200m strong free, 20s rest — best sustainable pace")}
-
-${rep(4, "50m fast, 30s rest")}
-
-Cooldown
-- 200m easy choice`,
+        blocks: [
+          "Warmup 400mtr",
+          rep("Build", 4, ["Swim 50mtr", "Rest 15s"]),
+          rep("Threshold", 5, ["Free 200mtr", "Rest 20s"]),
+          rep("Sprints", 4, ["Fast 50mtr", "Rest 30s"]),
+          "Cooldown 200mtr",
+        ],
       };
     case "peak":
       return {
         title: "Race-Pace 100s",
         durationMin: 50,
-        body: `Warmup
-- 400m easy free
-- 6x50m descend 1-3, 15s rest
-
-Main
-${rep(8, "100m fast free at target race pace, 20s rest")}
-
-Cooldown
-- 200m easy choice`,
+        blocks: [
+          "Warmup 400mtr",
+          rep("Descend", 6, ["Swim 50mtr", "Rest 15s"]),
+          rep("Race Pace", 8, ["Fast 100mtr", "Rest 20s"]),
+          "Cooldown 200mtr",
+        ],
       };
     case "taper":
       return {
         title: "Taper Tune-Up",
         durationMin: 35,
-        body: `Warmup
-- 300m easy free
-
-Main
-${rep(6, "50m at race pace, 20s rest")}
-- 200m smooth free
-
-Cooldown
-- 100m easy choice`,
+        blocks: [
+          "Warmup 300mtr",
+          rep("Race Pace", 6, ["Fast 50mtr", "Rest 20s"]),
+          "Smooth Free 200mtr",
+          "Cooldown 100mtr",
+        ],
       };
     case "recovery":
       return {
         title: "Easy Swim",
         durationMin: 35,
-        body: `- 300m easy free
-- 6x50m drill of choice, 15s rest
-- 400m smooth free
-- 100m easy backstroke`,
+        blocks: [
+          "Warmup 300mtr",
+          rep("Drills", 6, ["Drill 50mtr", "Rest 15s"]),
+          "Smooth Free 400mtr",
+          "Cooldown 100mtr",
+        ],
       };
   }
 }
 
+// Strength has no HR/power target, so each set is a named time block; the
+// rep scheme lives in the name using "×" (not "x", which would trip the
+// repeat parser).
 function liftSession(block: TrainingBlock, tier: ReadinessTier): Session {
-  if (tier === "low") {
+  if (tier === "low")
     return {
       title: "Mobility + Core",
       durationMin: 30,
-      body: `- 10m dynamic mobility flow (hips, t-spine, ankles)
-- 15m core circuit: 3 rounds — 45s plank, 10 dead bugs/side, 12 glute bridges, 30s side plank/side
-- 5m easy stretching`,
+      blocks: ["Mobility Flow 10m", "Core Circuit 15m", "Stretch 5m"],
     };
-  }
-  if (tier === "medium") {
+  if (tier === "medium")
     return {
       title: "Full-Body Strength",
       durationMin: 45,
-      body: `Warmup
-- 10m dynamic warmup + empty-bar work
-
-Main
-- 12m squat or leg press: 3x8 moderate, 2m rest
-- 10m bench or push-up variation: 3x8-10
-- 10m row variation: 3x10
-
-Core
-- 8m: 3 rounds — 10 hanging knee raises, 30s pallof press/side
-
-Cooldown
-- 5m stretching`,
+      blocks: [
+        "Warmup 10m",
+        "Squat 3×8 12m",
+        "Bench 3×8 10m",
+        "Row 3×10 10m",
+        "Core 8m",
+        "Stretch 5m",
+      ],
     };
-  }
   switch (block) {
     case "base":
       return {
         title: "Strength Endurance",
         durationMin: 50,
-        body: `Warmup
-- 10m dynamic warmup + ramp sets
-
-Main
-- 12m goblet squat: 3x12, 90s rest
-- 10m Romanian deadlift: 3x10
-- 10m push-up + single-arm row superset: 3x(12+10/side)
-- 8m walking lunges: 3x10/side
-
-Cooldown
-- 10m core + stretching`,
+        blocks: [
+          "Warmup 10m",
+          "Goblet Squat 3×12 12m",
+          "Romanian Deadlift 3×10 10m",
+          "Push-Up + Row 3×12 10m",
+          "Walking Lunge 3×10 8m",
+          "Core + Stretch 10m",
+        ],
       };
     case "build":
       return {
         title: "Max Strength",
         durationMin: 55,
-        body: `Warmup
-- 12m dynamic warmup + ramp to working weight
-
-Main
-- 15m back squat: 4x5 heavy, 2-3m rest
-- 12m deadlift: 3x5, 2-3m rest
-- 10m bench press: 4x5
-
-Accessory
-- 10m: pull-ups 3x6-8, hip thrust 3x8
-
-Cooldown
-- 6m stretching`,
+        blocks: [
+          "Warmup 12m",
+          "Back Squat 4×5 15m",
+          "Deadlift 3×5 12m",
+          "Bench Press 4×5 10m",
+          "Pull-Up + Hip Thrust 3×8 10m",
+          "Stretch 6m",
+        ],
       };
     case "peak":
       return {
-        title: "Power (Low Volume)",
+        title: "Power",
         durationMin: 40,
-        body: `Warmup
-- 12m dynamic warmup, build to fast reps
-
-Main
-- 10m trap-bar jump or squat jump: 4x3 explosive, full rest
-- 10m push press: 4x3 fast
-- 8m kettlebell swing: 4x8 powerful
-
-Cooldown
-- 10m mobility, leave feeling fresh`,
+        blocks: [
+          "Warmup 12m",
+          "Trap-Bar Jump 4×3 10m",
+          "Push Press 4×3 10m",
+          "Kettlebell Swing 4×8 8m",
+          "Mobility 10m",
+        ],
       };
     case "taper":
       return {
-        title: "Maintenance (Light)",
+        title: "Maintenance",
         durationMin: 30,
-        body: `Warmup
-- 8m dynamic warmup
-
-Main
-- 8m squat: 2x5 @ ~60% of normal, crisp
-- 6m push: 2x8 light
-- 6m pull: 2x8 light
-
-Cooldown
-- 2m shake out — nothing to fatigue`,
+        blocks: [
+          "Warmup 8m",
+          "Squat 2×5 8m",
+          "Push 2×8 6m",
+          "Pull 2×8 6m",
+          "Stretch 2m",
+        ],
       };
     case "recovery":
       return {
         title: "Mobility Session",
         durationMin: 30,
-        body: `- 15m full-body mobility flow
-- 10m light core: 2 rounds — 30s plank, 10 bird-dogs/side, 12 glute bridges
-- 5m breathing + stretching`,
+        blocks: ["Mobility Flow 15m", "Light Core 10m", "Breathing 5m"],
       };
   }
 }
@@ -679,7 +623,9 @@ export function generateWorkouts(
         ? ` Second session of the day — intensity stepped down to ${TIER_WORD[tier]}.`
         : "";
     const rationale = `${ctx.summary}. ${meta.label} set to ${TIER_WORD[tier]} for your ${block} block.${slotNote}`;
-    const description = `${s.body}\n\nCoach: ${rationale}`;
+    // description is the pure intervals.icu workout text — no notes beyond set
+    // names. The rationale is returned separately for the dashboard card only.
+    const description = renderWorkout(s.blocks);
     return {
       sport,
       icuType: meta.icuType,

@@ -248,9 +248,11 @@ The Coach section turns the morning's Garmin stats into the day's training:
 3. **Generate** — readiness (or sleep score as fallback) maps to a tier:
    ≥67 → quality session (flavor set by your block: tempo/sweet-spot in base,
    threshold in build, VO2/race-pace in peak, openers in taper), 34–66 → steady
-   endurance, <34 → recovery. Each card shows the workout in intervals.icu text
-   (run %LTHR, bike %FTP, swim distance steps, lifting timed blocks) plus the
-   coach rationale referencing your actual overnight numbers.
+   endurance, <34 → recovery. Each card shows the workout in intervals.icu
+   workout-builder text (run %LTHR, bike %FTP ramps, swim `mtr` distance sets,
+   lifting named time blocks) — every line a valid step, nothing but the set
+   name beyond the structured duration/target. The readiness rationale is shown
+   on the dashboard card only; it is NOT written into the exported workout.
 4. **Send to intervals.icu** — one click per workout (or send all) creates planned
    workout events on your calendar for the selected date; the text parses into
    structured steps and syncs wherever intervals.icu pushes.
