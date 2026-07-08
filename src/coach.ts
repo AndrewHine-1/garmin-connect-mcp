@@ -173,7 +173,6 @@ export interface GeneratedWorkout {
 // lines). The set name is the ONLY text on a step besides the structured
 // duration/target — no prose notes.
 interface Rep {
-  name: string;
   n: number;
   children: string[];
 }
@@ -185,22 +184,33 @@ interface Session {
   blocks: Block[];
 }
 
-function rep(name: string, n: number, children: string[]): Rep {
-  return { name, n, children };
+function rep(n: number, children: string[]): Rep {
+  return { n, children };
 }
 
-// intervals.icu syntax (per the official quick guide):
-//  - a step is "[name] duration|distance [target] [cadence]"; text before the
-//    first duration is the step's name/cue.
-//  - repeats are "Name Nx" then "- child" lines, with one empty line before AND
-//    after the block. Joining every block with a blank line guarantees that.
-//  - "m" means minutes; meters must be written "mtr".
+// Build one step in the intervals.icu order the athlete confirmed works:
+// "<duration|distance> [name] <zone> hr". Zone is "z1" or "z2-z4"; the HR zone
+// is the actual target. "m" = minutes, meters are "mtr".
+function step(dd: string, name: string, zone: string): string {
+  const parts = [dd];
+  if (name) parts.push(name);
+  if (zone) parts.push(`${zone} hr`);
+  return parts.join(" ");
+}
+
+function rest(dd: string): string {
+  return `${dd} rest`;
+}
+
+// Render to intervals.icu workout-builder text: top-level steps take a leading
+// "- "; repeats are a bare "Nx" header + "- child" lines. Every block is
+// blank-line separated so repeats keep the required empty line before and after.
 function renderWorkout(blocks: Block[]): string {
   return blocks
     .map((b) =>
       typeof b === "string"
-        ? `- ${b}` // top-level steps need the leading dash to parse
-        : `${b.name} ${b.n}x\n${b.children.map((c) => `- ${c}`).join("\n")}`
+        ? `- ${b}`
+        : `${b.n}x\n${b.children.map((c) => `- ${c}`).join("\n")}`
     )
     .join("\n\n");
 }
@@ -217,20 +227,17 @@ function runSession(block: TrainingBlock, tier: ReadinessTier): Session {
     return {
       title: "Recovery Jog",
       durationMin: 35,
-      blocks: ["Recovery Jog Zone1 35m 60-70% LTHR"],
+      blocks: [step("35m", "recovery jog", "z1")],
     };
   if (tier === "medium")
     return {
       title: "Aerobic Endurance + Strides",
       durationMin: 55,
       blocks: [
-        "Warmup Zone1-2 10m 65-72% LTHR",
-        "Endurance Zone2 35m 72-80% LTHR",
-        rep("Strides", 4, [
-          "Stride Zone4 20s 95% LTHR",
-          "Easy Zone1 70s 60-68% LTHR",
-        ]),
-        "Cooldown Zone1 4m 60-68% LTHR",
+        step("10m", "warm up", "z1-z2"),
+        step("35m", "endurance", "z2"),
+        rep(4, [step("20s", "stride", "z4"), step("70s", "easy", "z1")]),
+        step("4m", "cool down", "z1"),
       ],
     };
   switch (block) {
@@ -239,12 +246,9 @@ function runSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Tempo Run",
         durationMin: 60,
         blocks: [
-          "Warmup Zone1-2 15m 62-75% LTHR",
-          rep("Tempo", 2, [
-            "Tempo Zone3 15m 88-93% LTHR",
-            "Float Zone1 5m 65% LTHR",
-          ]),
-          "Cooldown Zone1 5m 60-68% LTHR",
+          step("15m", "warm up", "z1-z2"),
+          rep(2, [step("15m", "tempo", "z3"), step("5m", "float", "z1")]),
+          step("5m", "cool down", "z1"),
         ],
       };
     case "build":
@@ -252,12 +256,9 @@ function runSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Threshold Intervals",
         durationMin: 62,
         blocks: [
-          "Warmup Zone1-2 15m 62-78% LTHR",
-          rep("Threshold", 4, [
-            "Hard Zone4 8m 98-103% LTHR",
-            "Jog Zone1 3m 62-70% LTHR",
-          ]),
-          "Cooldown Zone1 5m 60-68% LTHR",
+          step("15m", "warm up", "z1-z2"),
+          rep(4, [step("8m", "hard", "z4"), step("3m", "easy", "z1")]),
+          step("5m", "cool down", "z1"),
         ],
       };
     case "peak":
@@ -265,12 +266,9 @@ function runSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "VO2 Intervals",
         durationMin: 55,
         blocks: [
-          "Warmup Zone1-2 15m 62-80% LTHR",
-          rep("VO2", 5, [
-            "Hard Zone5 4m 104-110% LTHR",
-            "Jog Zone1 3m 62% LTHR",
-          ]),
-          "Cooldown Zone1 5m 60-68% LTHR",
+          step("15m", "warm up", "z1-z2"),
+          rep(5, [step("4m", "hard", "z5"), step("3m", "easy", "z1")]),
+          step("5m", "cool down", "z1"),
         ],
       };
     case "taper":
@@ -278,19 +276,16 @@ function runSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Taper Openers",
         durationMin: 40,
         blocks: [
-          "Warmup Zone1-2 12m 65-75% LTHR",
-          rep("Openers", 4, [
-            "Quick Zone4-5 90s 100-105% LTHR",
-            "Jog Zone1 2m 62% LTHR",
-          ]),
-          "Cooldown Zone1 8m 60-68% LTHR",
+          step("12m", "warm up", "z1-z2"),
+          rep(4, [step("90s", "quick", "z4-z5"), step("2m", "easy", "z1")]),
+          step("8m", "cool down", "z1"),
         ],
       };
     case "recovery":
       return {
         title: "Easy Aerobic Run",
         durationMin: 40,
-        blocks: ["Easy Run Zone1-2 40m 62-72% LTHR"],
+        blocks: [step("40m", "easy run", "z1-z2")],
       };
   }
 }
@@ -300,16 +295,16 @@ function trailSession(block: TrainingBlock, tier: ReadinessTier): Session {
     return {
       title: "Easy Trail Shakeout",
       durationMin: 40,
-      blocks: ["Easy Trail Zone1-2 40m 60-72% LTHR"],
+      blocks: [step("40m", "easy trail", "z1-z2")],
     };
   if (tier === "medium")
     return {
       title: "Rolling Trail Endurance",
       durationMin: 70,
       blocks: [
-        "Warmup Zone1-2 10m 65-72% LTHR",
-        "Rolling Endurance Zone2 55m 72-82% LTHR",
-        "Cooldown Zone1 5m 60-68% LTHR",
+        step("10m", "warm up", "z1-z2"),
+        step("55m", "rolling endurance", "z2"),
+        step("5m", "cool down", "z1"),
       ],
     };
   switch (block) {
@@ -318,9 +313,9 @@ function trailSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Hilly Steady State",
         durationMin: 75,
         blocks: [
-          "Warmup Zone1-2 15m 65-75% LTHR",
-          "Hilly Steady State Zone2-3 50m 78-86% LTHR",
-          "Cooldown Zone1 10m 60-70% LTHR",
+          step("15m", "warm up", "z1-z2"),
+          step("50m", "hilly steady state", "z2-z3"),
+          step("10m", "cool down", "z1"),
         ],
       };
     case "build":
@@ -328,12 +323,9 @@ function trailSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Hill Repeats",
         durationMin: 65,
         blocks: [
-          "Warmup Zone1-2 15m 62-78% LTHR",
-          rep("Hill Repeats", 7, [
-            "Uphill Zone5 3m 98-106% LTHR",
-            "Down Zone1 3m 55-65% LTHR",
-          ]),
-          "Cooldown Zone1 8m 60-70% LTHR",
+          step("15m", "warm up", "z1-z2"),
+          rep(7, [step("3m", "uphill", "z5"), step("3m", "down", "z1")]),
+          step("8m", "cool down", "z1"),
         ],
       };
     case "peak":
@@ -341,12 +333,9 @@ function trailSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Rolling Surges",
         durationMin: 60,
         blocks: [
-          "Warmup Zone1-2 15m 62-78% LTHR",
-          rep("Surges", 6, [
-            "Surge Zone5 45s 100-106% LTHR",
-            "Steady Zone3 4m15s 80-88% LTHR",
-          ]),
-          "Cooldown Zone1 10m 60-70% LTHR",
+          step("15m", "warm up", "z1-z2"),
+          rep(6, [step("45s", "surge", "z5"), step("4m15s", "steady", "z3")]),
+          step("10m", "cool down", "z1"),
         ],
       };
     case "taper":
@@ -354,19 +343,16 @@ function trailSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Short Trail + Pickups",
         durationMin: 40,
         blocks: [
-          "Warmup Zone1-2 15m 65-75% LTHR",
-          rep("Pickups", 3, [
-            "Pickup Zone4 60s 100% LTHR",
-            "Easy Zone1 3m 60-68% LTHR",
-          ]),
-          "Cooldown Zone1 8m 60-68% LTHR",
+          step("15m", "warm up", "z1-z2"),
+          rep(3, [step("60s", "pickup", "z4"), step("3m", "easy", "z1")]),
+          step("8m", "cool down", "z1"),
         ],
       };
     case "recovery":
       return {
         title: "Easy Trail Run",
         durationMin: 45,
-        blocks: ["Easy Trail Run Zone1-2 45m 62-72% LTHR"],
+        blocks: [step("45m", "easy trail run", "z1-z2")],
       };
   }
 }
@@ -376,16 +362,16 @@ function bikeSession(block: TrainingBlock, tier: ReadinessTier): Session {
     return {
       title: "Recovery Spin",
       durationMin: 40,
-      blocks: ["Recovery Spin Zone1 40m 45-55%"],
+      blocks: [step("40m", "recovery spin", "z1")],
     };
   if (tier === "medium")
     return {
       title: "Endurance + Tempo",
       durationMin: 75,
       blocks: [
-        "Warmup Zone1 10m ramp 50%-65%",
-        rep("Tempo", 2, ["Tempo Zone2-3 20m 76-84%", "Easy Zone1 5m 55%"]),
-        "Cooldown Zone1 10m 50-60%",
+        step("10m", "warm up", "z1"),
+        rep(2, [step("20m", "tempo", "z2-z3"), step("5m", "easy", "z1")]),
+        step("10m", "cool down", "z1"),
       ],
     };
   switch (block) {
@@ -394,9 +380,9 @@ function bikeSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Sweet Spot Intervals",
         durationMin: 80,
         blocks: [
-          "Warmup Zone1 15m ramp 50%-70%",
-          rep("Sweet Spot", 3, ["Work Zone3 12m 88-93%", "Easy Zone1 5m 55%"]),
-          "Cooldown Zone1 10m 50-60%",
+          step("15m", "warm up", "z1"),
+          rep(3, [step("12m", "sweet spot", "z3"), step("5m", "easy", "z1")]),
+          step("10m", "cool down", "z1"),
         ],
       };
     case "build":
@@ -404,9 +390,9 @@ function bikeSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Threshold Intervals",
         durationMin: 78,
         blocks: [
-          "Warmup Zone1 15m ramp 50%-75%",
-          rep("Threshold", 4, ["Work Zone4 8m 98-104%", "Easy Zone1 4m 55%"]),
-          "Cooldown Zone1 10m 50-60%",
+          step("15m", "warm up", "z1"),
+          rep(4, [step("8m", "threshold", "z4"), step("4m", "easy", "z1")]),
+          step("10m", "cool down", "z1"),
         ],
       };
     case "peak":
@@ -414,9 +400,9 @@ function bikeSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "VO2 Intervals",
         durationMin: 65,
         blocks: [
-          "Warmup Zone1 15m ramp 50%-75%",
-          rep("VO2", 5, ["Hard Zone5 3m 110-118%", "Easy Zone1 3m 50%"]),
-          "Cooldown Zone1 10m 50-60%",
+          step("15m", "warm up", "z1"),
+          rep(5, [step("3m", "hard", "z5"), step("3m", "easy", "z1")]),
+          step("10m", "cool down", "z1"),
         ],
       };
     case "taper":
@@ -424,16 +410,16 @@ function bikeSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Taper Openers",
         durationMin: 45,
         blocks: [
-          "Warmup Zone1 15m ramp 50%-70%",
-          rep("Openers", 3, ["Crisp Zone4 2m 100-105%", "Easy Zone1 4m 55%"]),
-          "Cooldown Zone1 10m 50-60%",
+          step("15m", "warm up", "z1"),
+          rep(3, [step("2m", "crisp", "z4"), step("4m", "easy", "z1")]),
+          step("10m", "cool down", "z1"),
         ],
       };
     case "recovery":
       return {
         title: "Easy Endurance Spin",
         durationMin: 60,
-        blocks: ["Easy Spin Zone1-2 60m 55-68%"],
+        blocks: [step("60m", "easy spin", "z1-z2")],
       };
   }
 }
@@ -444,10 +430,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
       title: "Technique Swim",
       durationMin: 35,
       blocks: [
-        "Warmup Zone1-2 300mtr",
-        rep("Catch-Up Drill", 6, ["Drill Zone1 50mtr", "Rest 15s"]),
-        "Smooth Free Zone2 400mtr",
-        "Cooldown Zone1 100mtr",
+        step("300mtr", "warm up", "z1"),
+        rep(6, [step("50mtr", "drill", "z1"), rest("15s")]),
+        step("400mtr", "smooth free", "z2"),
+        step("100mtr", "cool down", "z1"),
       ],
     };
   if (tier === "medium")
@@ -455,10 +441,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
       title: "Aerobic Endurance Swim",
       durationMin: 50,
       blocks: [
-        "Warmup Zone1-2 300mtr",
-        rep("Build", 4, ["Swim Zone2 50mtr", "Rest 15s"]),
-        rep("Endurance", 4, ["Free Zone2-3 400mtr", "Rest 30s"]),
-        "Cooldown Zone1 200mtr",
+        step("300mtr", "warm up", "z1-z2"),
+        rep(4, [step("50mtr", "build", "z2"), rest("15s")]),
+        rep(4, [step("400mtr", "endurance", "z2-z3"), rest("30s")]),
+        step("200mtr", "cool down", "z1"),
       ],
     };
   switch (block) {
@@ -467,11 +453,11 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Aerobic Intervals",
         durationMin: 55,
         blocks: [
-          "Warmup Zone1-2 400mtr",
-          rep("Drills", 4, ["Drill Zone1 50mtr", "Rest 15s"]),
-          rep("Aerobic", 10, ["Free Zone3 100mtr", "Rest 15s"]),
-          "Pull Zone2 300mtr",
-          "Cooldown Zone1 200mtr",
+          step("400mtr", "warm up", "z1-z2"),
+          rep(4, [step("50mtr", "drill", "z1"), rest("15s")]),
+          rep(10, [step("100mtr", "aerobic", "z3"), rest("15s")]),
+          step("300mtr", "pull", "z2"),
+          step("200mtr", "cool down", "z1"),
         ],
       };
     case "build":
@@ -479,11 +465,11 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Threshold 200s",
         durationMin: 60,
         blocks: [
-          "Warmup Zone1-2 400mtr",
-          rep("Build", 4, ["Swim Zone2 50mtr", "Rest 15s"]),
-          rep("Threshold", 5, ["Free Zone4 200mtr", "Rest 20s"]),
-          rep("Sprints", 4, ["Fast Zone5 50mtr", "Rest 30s"]),
-          "Cooldown Zone1 200mtr",
+          step("400mtr", "warm up", "z1-z2"),
+          rep(4, [step("50mtr", "build", "z2"), rest("15s")]),
+          rep(5, [step("200mtr", "threshold", "z4"), rest("20s")]),
+          rep(4, [step("50mtr", "sprint", "z5"), rest("30s")]),
+          step("200mtr", "cool down", "z1"),
         ],
       };
     case "peak":
@@ -491,10 +477,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Race-Pace 100s",
         durationMin: 50,
         blocks: [
-          "Warmup Zone1-2 400mtr",
-          rep("Descend", 6, ["Swim Zone2-3 50mtr", "Rest 15s"]),
-          rep("Race Pace", 8, ["Fast Zone4-5 100mtr", "Rest 20s"]),
-          "Cooldown Zone1 200mtr",
+          step("400mtr", "warm up", "z1-z2"),
+          rep(6, [step("50mtr", "descend", "z2-z3"), rest("15s")]),
+          rep(8, [step("100mtr", "race pace", "z4-z5"), rest("20s")]),
+          step("200mtr", "cool down", "z1"),
         ],
       };
     case "taper":
@@ -502,10 +488,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Taper Tune-Up",
         durationMin: 35,
         blocks: [
-          "Warmup Zone1-2 300mtr",
-          rep("Race Pace", 6, ["Fast Zone4 50mtr", "Rest 20s"]),
-          "Smooth Free Zone2 200mtr",
-          "Cooldown Zone1 100mtr",
+          step("300mtr", "warm up", "z1-z2"),
+          rep(6, [step("50mtr", "race pace", "z4"), rest("20s")]),
+          step("200mtr", "smooth free", "z2"),
+          step("100mtr", "cool down", "z1"),
         ],
       };
     case "recovery":
@@ -513,10 +499,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         title: "Easy Swim",
         durationMin: 35,
         blocks: [
-          "Warmup Zone1-2 300mtr",
-          rep("Drills", 6, ["Drill Zone1 50mtr", "Rest 15s"]),
-          "Smooth Free Zone2 400mtr",
-          "Cooldown Zone1 100mtr",
+          step("300mtr", "warm up", "z1-z2"),
+          rep(6, [step("50mtr", "drill", "z1"), rest("15s")]),
+          step("400mtr", "smooth free", "z2"),
+          step("100mtr", "cool down", "z1"),
         ],
       };
   }
