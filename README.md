@@ -251,8 +251,11 @@ The Coach section turns the morning's Garmin stats into the day's training:
    endurance, <34 → recovery. Each card shows the workout in intervals.icu
    workout-builder text (run %LTHR, bike %FTP ramps, swim `mtr` distance sets,
    lifting named time blocks) — every line a valid step, nothing but the set
-   name beyond the structured duration/target. The readiness rationale is shown
-   on the dashboard card only; it is NOT written into the exported workout.
+   name beyond the structured duration/target. Cardio steps also carry the
+   expected HR zone in the set name (e.g. `Warmup Zone1-2`, `Hard Zone4`),
+   written as `ZoneN` text so it displays without being mistaken for a power-zone
+   target (a bare `Z4` would be). The readiness rationale is shown on the
+   dashboard card only; it is NOT written into the exported workout.
 4. **Send to intervals.icu** — one click per workout (or send all) creates planned
    workout events on your calendar for the selected date; the text parses into
    structured steps and syncs wherever intervals.icu pushes.
