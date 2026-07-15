@@ -81,6 +81,19 @@ export const DASHBOARD_HTML = `<!doctype html>
   .savetag { font-size:11px; color:var(--good); opacity:0; transition:opacity .2s; }
   .savetag.show { opacity:1; }
 
+  /* vo2 chart */
+  .vrow { display:flex; gap:6px; align-items:center; margin-bottom:10px; }
+  .vbtn { padding:5px 12px; font-size:12px; }
+  .vbtn.on { border-color:var(--accent); color:var(--accent); }
+  .vo2wrap { position:relative; }
+  .vo2wrap svg { display:block; width:100%; height:auto; }
+  .vo2tip { position:absolute; pointer-events:none; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:12px; display:none; z-index:5; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,.4); }
+  .vo2tip .tval { font-weight:600; font-size:13px; color:var(--text); }
+  .vo2tip .tdate { color:var(--text2); }
+  table.vtab { width:100%; border-collapse:collapse; font-size:12px; }
+  table.vtab td, table.vtab th { padding:4px 8px; border-bottom:1px solid var(--line); text-align:left; }
+  table.vtab th { color:var(--text2); font-weight:500; }
+
   /* coach */
   .coachrow { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
   .chips { display:flex; gap:6px; flex-wrap:wrap; }
@@ -249,6 +262,19 @@ export const DASHBOARD_HTML = `<!doctype html>
     <h2 class="section">History &amp; streaks <span class="muted">· last 30 days</span></h2>
     <div class="card grid" id="history"><div class="muted">Loading…</div></div>
 
+    <!-- VO2MAX TREND -->
+    <h2 class="section">VO2max trend <span class="muted">· running fitness over time</span></h2>
+    <div class="card">
+      <div class="vrow">
+        <button class="ghost vbtn" data-vdays="90">3m</button>
+        <button class="ghost vbtn on" data-vdays="180">6m</button>
+        <button class="ghost vbtn" data-vdays="365">1y</button>
+        <span class="muted" id="vo2meta" style="font-size:12px"></span>
+      </div>
+      <div id="vo2chart" class="vo2wrap"><div class="muted">Loading…</div></div>
+      <details style="margin-top:8px"><summary class="muted" style="font-size:12px;cursor:pointer">Data table</summary><div id="vo2table" style="max-height:220px;overflow:auto"></div></details>
+    </div>
+
     <!-- CONSOLE -->
     <h2 class="section" style="margin-bottom:0"></h2>
     <details class="console card">
@@ -290,7 +316,7 @@ export const DASHBOARD_HTML = `<!doctype html>
 <script>
 (function(){
   "use strict";
-  var S = { date:null, pinned:"training_readiness", authed:false, sessionExpired:false, autoLogin:false, commands:[], selCmd:null, sessionLog:[], pending:null, journal:null, resultMode:"pretty", lastResult:null, coach:{ settings:null, selected:[], workouts:null, forDate:null } };
+  var S = { date:null, pinned:"training_readiness", authed:false, sessionExpired:false, autoLogin:false, commands:[], selCmd:null, sessionLog:[], pending:null, journal:null, resultMode:"pretty", lastResult:null, coach:{ settings:null, selected:[], workouts:null, forDate:null }, vo2:{ days:180, data:null } };
 
   function qs(s){ return document.querySelector(s); }
   function esc(v){ return String(v==null?"":v).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c]; }); }
@@ -690,6 +716,135 @@ export const DASHBOARD_HTML = `<!doctype html>
     });
   }
 
+  // ---------- vo2 trend ----------
+  // Series colors validated for the dark card surface (accent teal; blue for
+  // cycling when present). Text/labels always use text tokens, never series color.
+  var VO2_COLORS = { running:"#1FA98C", cycling:"#3987E5" };
+
+  function loadVo2(){
+    if(!S.authed){ qs("#vo2chart").innerHTML='<div class="muted">Log in to Garmin to load your VO2max history.</div>'; return; }
+    qs("#vo2chart").innerHTML='<div class="muted">Loading…</div>';
+    var start = shiftDate(todayISO(), -S.vo2.days);
+    run("get-vo2max-history", { startDate:start, endDate:todayISO() }, function(res){
+      if(!res || !res.ok){
+        qs("#vo2chart").innerHTML='<div class="muted">'+esc((res&&res.error)||"Could not load VO2max history.")+'</div>';
+        return;
+      }
+      S.vo2.data = res.result.points || [];
+      renderVo2();
+    });
+  }
+
+  function vo2NiceStep(range){
+    var cands=[0.2,0.5,1,2,5,10], target=range/4;
+    for(var i=0;i<cands.length;i++){ if(cands[i]>=target) return cands[i]; }
+    return 10;
+  }
+
+  function renderVo2(){
+    var pts = S.vo2.data || [];
+    var runPts = pts.filter(function(p){ return p.running!=null; });
+    var cycPts = pts.filter(function(p){ return p.cycling!=null; });
+    qs("#vo2meta").textContent = runPts.length ? (runPts.length+" days · latest "+runPts[runPts.length-1].running.toFixed(1)) : "";
+    if(!runPts.length && !cycPts.length){
+      qs("#vo2chart").innerHTML='<div class="muted">No VO2max data in this range — record some outdoor runs with HR to build the estimate.</div>';
+      qs("#vo2table").innerHTML="";
+      return;
+    }
+    var W=800, H=240, L=44, R=16, T=14, B=26;
+    var iw=W-L-R, ih=H-T-B;
+    var all=[]; runPts.forEach(function(p){ all.push(p.running); }); cycPts.forEach(function(p){ all.push(p.cycling); });
+    var vmin=Math.min.apply(null,all), vmax=Math.max.apply(null,all);
+    var pad=Math.max(0.5,(vmax-vmin)*0.15); vmin-=pad; vmax+=pad;
+    var stepY=vo2NiceStep(vmax-vmin);
+    var y0=Math.floor(vmin/stepY)*stepY, y1=Math.ceil(vmax/stepY)*stepY;
+    var t0=new Date(pts[0].date+"T00:00:00Z").getTime(), t1=new Date(pts[pts.length-1].date+"T00:00:00Z").getTime();
+    if(t1===t0) t1=t0+86400000;
+    function X(d){ return L + (new Date(d+"T00:00:00Z").getTime()-t0)/(t1-t0)*iw; }
+    function Y(v){ return T + (1-(v-y0)/(y1-y0))*ih; }
+
+    var svg='<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet" role="img" aria-label="VO2max over time">';
+    // hairline gridlines + y ticks (clean numbers, text tokens)
+    for(var gv=y0; gv<=y1+0.001; gv+=stepY){
+      var gy=Y(gv);
+      svg+='<line x1="'+L+'" y1="'+gy.toFixed(1)+'" x2="'+(W-R)+'" y2="'+gy.toFixed(1)+'" stroke="#232C39" stroke-width="1"/>';
+      svg+='<text x="'+(L-8)+'" y="'+(gy+3.5).toFixed(1)+'" text-anchor="end" font-size="11" fill="#8B97A7" style="font-variant-numeric:tabular-nums">'+(stepY<1?gv.toFixed(1):Math.round(gv))+'</text>';
+    }
+    // x ticks: ~4 date labels
+    var nx=4;
+    for(var xi=0; xi<=nx; xi++){
+      var tt=t0+(t1-t0)*xi/nx, dd=new Date(tt);
+      var lbl=(dd.getUTCMonth()+1)+"/"+dd.getUTCDate();
+      var xx=L+iw*xi/nx;
+      svg+='<text x="'+xx.toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="11" fill="#8B97A7">'+lbl+'</text>';
+    }
+    function seriesPath(list, key){
+      var d="";
+      list.forEach(function(p,i){ d+=(i?"L":"M")+X(p.date).toFixed(1)+" "+Y(p[key]).toFixed(1)+" "; });
+      return d.trim();
+    }
+    function drawSeries(list, key, color){
+      if(!list.length) return "";
+      var out="";
+      if(list.length>1){
+        // area wash at 10% opacity
+        var area=seriesPath(list,key)+" L"+X(list[list.length-1].date).toFixed(1)+" "+Y(y0).toFixed(1)+" L"+X(list[0].date).toFixed(1)+" "+Y(y0).toFixed(1)+" Z";
+        out+='<path d="'+area+'" fill="'+color+'" opacity="0.1"/>';
+        out+='<path d="'+seriesPath(list,key)+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+      }
+      // endpoint dot: r4 fill + 2px surface ring, direct label in text token
+      var lp=list[list.length-1], ex=X(lp.date), ey=Y(lp[key]);
+      out+='<circle cx="'+ex.toFixed(1)+'" cy="'+ey.toFixed(1)+'" r="6" fill="#1C2330"/>';
+      out+='<circle cx="'+ex.toFixed(1)+'" cy="'+ey.toFixed(1)+'" r="4" fill="'+color+'"/>';
+      var lx = ex+10>W-R-34 ? ex-10 : ex+10;
+      var anch = ex+10>W-R-34 ? "end" : "start";
+      out+='<text x="'+lx.toFixed(1)+'" y="'+(ey+4).toFixed(1)+'" text-anchor="'+anch+'" font-size="12" font-weight="600" fill="#E8EDF2">'+lp[key].toFixed(1)+'</text>';
+      return out;
+    }
+    svg+=drawSeries(runPts,"running",VO2_COLORS.running);
+    svg+=drawSeries(cycPts,"cycling",VO2_COLORS.cycling);
+    svg+='<line id="vo2x" x1="0" y1="'+T+'" x2="0" y2="'+(T+ih)+'" stroke="#5A6573" stroke-width="1" style="display:none"/>';
+    svg+='<circle id="vo2dot" r="4" fill="'+VO2_COLORS.running+'" stroke="#1C2330" stroke-width="2" style="display:none"/>';
+    svg+='</svg>';
+
+    // legend only when two series exist (single series: title carries identity)
+    var legend = (runPts.length && cycPts.length)
+      ? '<div style="display:flex;gap:14px;font-size:12px;color:var(--text2);margin-top:4px"><span><span style="display:inline-block;width:14px;height:2px;background:'+VO2_COLORS.running+';vertical-align:middle;margin-right:5px"></span>Running</span><span><span style="display:inline-block;width:14px;height:2px;background:'+VO2_COLORS.cycling+';vertical-align:middle;margin-right:5px"></span>Cycling</span></div>'
+      : "";
+    qs("#vo2chart").innerHTML = svg + legend + '<div class="vo2tip" id="vo2tip"><div class="tval"></div><div class="tdate"></div></div>';
+
+    // data table view (values reachable without hover)
+    var tbl='<table class="vtab"><tr><th>Date</th><th>Running</th>'+(cycPts.length?'<th>Cycling</th>':'')+'</tr>';
+    for(var ti=pts.length-1; ti>=0; ti--){
+      var p=pts[ti];
+      tbl+='<tr><td>'+esc(p.date)+'</td><td class="num">'+(p.running!=null?p.running.toFixed(1):"—")+'</td>'+(cycPts.length?('<td class="num">'+(p.cycling!=null?p.cycling.toFixed(1):"—")+'</td>'):'')+'</tr>';
+    }
+    qs("#vo2table").innerHTML = tbl+'</table>';
+
+    // crosshair + tooltip: snap to nearest date; value leads, date follows
+    var svgEl=qs("#vo2chart svg"), tip=qs("#vo2tip"), xline=qs("#vo2x"), dot=qs("#vo2dot");
+    var hoverList = runPts.length ? runPts : cycPts;
+    var hoverKey = runPts.length ? "running" : "cycling";
+    svgEl.addEventListener("pointermove", function(ev){
+      var rect=svgEl.getBoundingClientRect();
+      var px=(ev.clientX-rect.left)*(W/rect.width);
+      var best=null, bd=1e18;
+      hoverList.forEach(function(p){ var d=Math.abs(X(p.date)-px); if(d<bd){ bd=d; best=p; } });
+      if(!best){ return; }
+      var bx=X(best.date), by=Y(best[hoverKey]);
+      xline.setAttribute("x1",bx.toFixed(1)); xline.setAttribute("x2",bx.toFixed(1)); xline.style.display="block";
+      dot.setAttribute("cx",bx.toFixed(1)); dot.setAttribute("cy",by.toFixed(1)); dot.style.display="block";
+      tip.querySelector(".tval").textContent = best[hoverKey].toFixed(1) + " VO2max";
+      tip.querySelector(".tdate").textContent = best.date + (best.cycling!=null && hoverKey==="running" ? (" · cycling "+best.cycling.toFixed(1)) : "");
+      tip.style.display="block";
+      var wrapRect=qs("#vo2chart").getBoundingClientRect();
+      var tx=(bx/W)*wrapRect.width;
+      tip.style.left = Math.min(Math.max(tx+12, 0), wrapRect.width-150) + "px";
+      tip.style.top = ((by/H)*(rect.height) - 8) + "px";
+    });
+    svgEl.addEventListener("pointerleave", function(){ tip.style.display="none"; xline.style.display="none"; dot.style.display="none"; });
+  }
+
   // ---------- coach ----------
   var SPORT_LABEL = { running:"Run", trail_running:"Trail Run", biking:"Bike", swimming:"Swim", weightlifting:"Lift" };
 
@@ -798,10 +953,11 @@ export const DASHBOARD_HTML = `<!doctype html>
       // Load the snapshot first; if it detects an expired session it flips us to
       // logged-out, so only run the analysis (which would otherwise pop the
       // login modal) when we're still authenticated.
-      loadSnapshot().then(function(){ if(S.authed) loadAnalysis(); });
+      loadSnapshot().then(function(){ if(S.authed){ loadAnalysis(); loadVo2(); } });
     } else {
       qs("#tiles").innerHTML='<div class="muted">Log in to Garmin to load your recovery metrics.</div>';
       qs("#analyzecard").innerHTML='<div class="muted">Log in to Garmin, then log a few habit days, to see what moves your recovery.</div>';
+      qs("#vo2chart").innerHTML='<div class="muted">Log in to Garmin to load your VO2max history.</div>';
     }
   }
 
@@ -823,6 +979,14 @@ export const DASHBOARD_HTML = `<!doctype html>
     qs("#icu-save").onclick=saveIcu;
     qs("#coachdate").textContent="· workouts for today";
     loadCoach();
+    Array.prototype.forEach.call(document.querySelectorAll(".vbtn"), function(b){
+      b.addEventListener("click", function(){
+        S.vo2.days = parseInt(b.getAttribute("data-vdays"),10);
+        Array.prototype.forEach.call(document.querySelectorAll(".vbtn"), function(x){ x.classList.remove("on"); });
+        b.classList.add("on");
+        loadVo2();
+      });
+    });
     qs("#cmdrun").onclick=runConsole;
     qs("#cmdsearch").oninput=function(){ renderCmdList(qs("#cmdsearch").value); };
     qs("#ft-server").textContent="Server: "+location.host;

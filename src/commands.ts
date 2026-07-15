@@ -305,6 +305,64 @@ export const COMMANDS: CommandDef[] = [
     "Latest VO2 Max / fitness level estimate",
     (d) => `metrics-service/metrics/maxmet/latest/${d}`
   ),
+  {
+    name: "get-vo2max-history",
+    group: "Recovery & Health",
+    description: "VO2 Max values over a date range (running and cycling)",
+    needsAuth: true,
+    params: [
+      {
+        name: "startDate",
+        type: "date",
+        required: false,
+        description: "YYYY-MM-DD, defaults to 180 days ago",
+      },
+      P_RANGE_END,
+    ],
+    run: async (ctx) => {
+      const client = ctx.requireClient();
+      const end = optStr(ctx, "endDate") ?? ctx.today;
+      const start = optStr(ctx, "startDate") ?? daysAgoIso(180);
+      // Fetch in ~90-day windows to stay under any server range limits.
+      interface MaxMetEntry {
+        generic?: { calendarDate?: string; vo2MaxPreciseValue?: number } | null;
+        cycling?: { calendarDate?: string; vo2MaxPreciseValue?: number } | null;
+      }
+      const points = new Map<
+        string,
+        { date: string; running: number | null; cycling: number | null }
+      >();
+      let cursor = start;
+      while (cursor <= end) {
+        const chunkEnd = (() => {
+          const d = new Date(cursor + "T00:00:00Z");
+          d.setUTCDate(d.getUTCDate() + 89);
+          const iso = d.toISOString().slice(0, 10);
+          return iso < end ? iso : end;
+        })();
+        const rows = (await client.get(
+          `metrics-service/metrics/maxmet/daily/${cursor}/${chunkEnd}`
+        )) as MaxMetEntry[] | { noData?: boolean };
+        if (Array.isArray(rows)) {
+          for (const r of rows) {
+            const date = r.generic?.calendarDate ?? r.cycling?.calendarDate;
+            if (!date) continue;
+            const running = r.generic?.vo2MaxPreciseValue ?? null;
+            const cycling = r.cycling?.vo2MaxPreciseValue ?? null;
+            if (running == null && cycling == null) continue;
+            points.set(date, { date, running, cycling });
+          }
+        }
+        const next = new Date(chunkEnd + "T00:00:00Z");
+        next.setUTCDate(next.getUTCDate() + 1);
+        cursor = next.toISOString().slice(0, 10);
+      }
+      const series = [...points.values()].sort((a, b) =>
+        a.date.localeCompare(b.date)
+      );
+      return { startDate: start, endDate: end, points: series };
+    },
+  },
   pathDateGet(
     "get-hydration",
     "Recovery & Health",

@@ -260,10 +260,27 @@ The Coach section turns the morning's Garmin stats into the day's training:
    workout events on your calendar for the selected date; the text parses into
    structured steps and syncs wherever intervals.icu pushes.
 
+Each (sport × block × readiness tier) cell holds a **pool of session variants
+drawn from professional endurance practice** — e.g. Norwegian double-threshold
+10×3 (Ingebrigtsen camp), Seiler 4×8s, Daniels cruise intervals, Canova
+alternations and race-pace blocks, Billat 30/30s, Rønnestad 40/20s, classic
+2×20s, over-unders, CSS threshold 200s/100s, broken 400s, USRPT 50s, Lydiard
+hill work. **Generate picks one at random each time** — hit Generate again to
+re-roll a different session at the same intensity. The variant's provenance
+shows in the dashboard rationale (never in the exported workout text).
+
 Connect intervals.icu once in the section's settings (athlete ID, e.g. `i599755`,
 and an API key from intervals.icu → Settings → Developer). Command console
 equivalents: `get-coach-settings`, `set-coach-settings`, `generate-workouts`,
 `export-workouts-icu`.
+
+### VO2max trend
+
+The dashboard charts your VO2max over time (3m / 6m / 1y presets) from Garmin's
+`maxmet` daily history — running and cycling series when both exist, with a
+crosshair tooltip and a data-table fallback. Command console equivalent:
+`get-vo2max-history` (fetches in 90-day chunks, returns `{date, running,
+cycling}` points).
 
 ### Automatic login (optional, unattended)
 
