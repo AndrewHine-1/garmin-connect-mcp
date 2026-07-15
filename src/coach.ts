@@ -198,7 +198,7 @@ function rep(n: number, children: string[]): Rep {
 
 // Build one step in the intervals.icu order the athlete confirmed works:
 // "<duration|distance> [name] <zone> hr". Zone is "z1" or "z2-z4"; the HR zone
-// is the actual target. "m" = minutes, meters are "mtr".
+// is the actual target. "m" = minutes; swim distances use "y" for yards.
 function step(dd: string, name: string, zone: string): string {
   const parts = [dd];
   if (name) parts.push(name);
@@ -799,10 +799,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         inspiration:
           "drill-focused technique day — recovery that still earns feel",
         blocks: [
-          step("300mtr", "warm up", "z1"),
-          rep(6, [step("50mtr", "drill", "z1"), rest("15s")]),
-          step("400mtr", "smooth free", "z2"),
-          step("100mtr", "cool down", "z1"),
+          step("300y", "warm up", "z1"),
+          rep(6, [step("50y", "drill", "z1"), rest("15s")]),
+          step("400y", "smooth free", "z2"),
+          step("100y", "cool down", "z1"),
         ],
       },
       {
@@ -810,10 +810,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         durationMin: 35,
         inspiration: "easy mixed-stroke recovery swim",
         blocks: [
-          step("300mtr", "warm up", "z1"),
-          rep(4, [step("100mtr", "easy choice", "z1-z2"), rest("20s")]),
-          step("300mtr", "smooth free", "z1-z2"),
-          step("100mtr", "cool down", "z1"),
+          step("300y", "warm up", "z1"),
+          rep(4, [step("100y", "easy choice", "z1-z2"), rest("20s")]),
+          step("300y", "smooth free", "z1-z2"),
+          step("100y", "cool down", "z1"),
         ],
       },
     ]);
@@ -824,10 +824,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         durationMin: 50,
         inspiration: "long aerobic repeats — distance-squad bread and butter",
         blocks: [
-          step("300mtr", "warm up", "z1-z2"),
-          rep(4, [step("50mtr", "build", "z2"), rest("15s")]),
-          rep(4, [step("400mtr", "endurance", "z2-z3"), rest("30s")]),
-          step("200mtr", "cool down", "z1"),
+          step("300y", "warm up", "z1-z2"),
+          rep(4, [step("50y", "build", "z2"), rest("15s")]),
+          rep(4, [step("400y", "endurance", "z2-z3"), rest("30s")]),
+          step("200y", "cool down", "z1"),
         ],
       },
       {
@@ -836,19 +836,19 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         inspiration:
           "pyramid set — building then descending distances at steady effort",
         blocks: [
-          step("300mtr", "warm up", "z1-z2"),
-          step("100mtr", "steady", "z2"),
+          step("300y", "warm up", "z1-z2"),
+          step("100y", "steady", "z2"),
           rest("15s"),
-          step("200mtr", "steady", "z2-z3"),
+          step("200y", "steady", "z2-z3"),
           rest("20s"),
-          step("300mtr", "steady", "z2-z3"),
+          step("300y", "steady", "z2-z3"),
           rest("25s"),
-          step("200mtr", "steady", "z2-z3"),
+          step("200y", "steady", "z2-z3"),
           rest("20s"),
-          step("100mtr", "steady", "z2"),
+          step("100y", "steady", "z2"),
           rest("15s"),
-          step("400mtr", "pull", "z2"),
-          step("200mtr", "cool down", "z1"),
+          step("400y", "pull", "z2"),
+          step("200y", "cool down", "z1"),
         ],
       },
     ]);
@@ -859,11 +859,11 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         durationMin: 55,
         inspiration: "high-rep aerobic 100s on short rest — classic base set",
         blocks: [
-          step("400mtr", "warm up", "z1-z2"),
-          rep(4, [step("50mtr", "drill", "z1"), rest("15s")]),
-          rep(10, [step("100mtr", "aerobic", "z3"), rest("15s")]),
-          step("300mtr", "pull", "z2"),
-          step("200mtr", "cool down", "z1"),
+          step("400y", "warm up", "z1-z2"),
+          rep(4, [step("50y", "drill", "z1"), rest("15s")]),
+          rep(10, [step("100y", "aerobic", "z3"), rest("15s")]),
+          step("300y", "pull", "z2"),
+          step("200y", "cool down", "z1"),
         ],
       },
       {
@@ -872,10 +872,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         inspiration:
           "negative-split repeats — pacing discipline under aerobic load",
         blocks: [
-          step("400mtr", "warm up", "z1-z2"),
-          rep(4, [step("50mtr", "build", "z2"), rest("15s")]),
-          rep(4, [step("300mtr", "negative split", "z2-z3"), rest("30s")]),
-          step("200mtr", "cool down", "z1"),
+          step("400y", "warm up", "z1-z2"),
+          rep(4, [step("50y", "build", "z2"), rest("15s")]),
+          rep(4, [step("300y", "negative split", "z2-z3"), rest("30s")]),
+          step("200y", "cool down", "z1"),
         ],
       },
     ],
@@ -885,11 +885,11 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         durationMin: 60,
         inspiration: "CSS-style threshold 200s — the swim-threshold standard",
         blocks: [
-          step("400mtr", "warm up", "z1-z2"),
-          rep(4, [step("50mtr", "build", "z2"), rest("15s")]),
-          rep(5, [step("200mtr", "threshold", "z4"), rest("20s")]),
-          rep(4, [step("50mtr", "sprint", "z5"), rest("30s")]),
-          step("200mtr", "cool down", "z1"),
+          step("400y", "warm up", "z1-z2"),
+          rep(4, [step("50y", "build", "z2"), rest("15s")]),
+          rep(5, [step("200y", "threshold", "z4"), rest("20s")]),
+          rep(4, [step("50y", "sprint", "z5"), rest("30s")]),
+          step("200y", "cool down", "z1"),
         ],
       },
       {
@@ -897,11 +897,11 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         durationMin: 58,
         inspiration: "10x100 at threshold on tight rest — CSS density work",
         blocks: [
-          step("400mtr", "warm up", "z1-z2"),
-          rep(4, [step("50mtr", "drill", "z1"), rest("15s")]),
-          rep(10, [step("100mtr", "threshold", "z4"), rest("15s")]),
-          step("300mtr", "pull", "z2"),
-          step("200mtr", "cool down", "z1"),
+          step("400y", "warm up", "z1-z2"),
+          rep(4, [step("50y", "drill", "z1"), rest("15s")]),
+          rep(10, [step("100y", "threshold", "z4"), rest("15s")]),
+          step("300y", "pull", "z2"),
+          step("200y", "cool down", "z1"),
         ],
       },
       {
@@ -909,10 +909,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         durationMin: 60,
         inspiration: "broken 400s — race-distance blocks split by micro-rests",
         blocks: [
-          step("400mtr", "warm up", "z1-z2"),
-          rep(12, [step("100mtr", "strong", "z4"), rest("10s")]),
-          rep(4, [step("50mtr", "easy", "z1-z2"), rest("15s")]),
-          step("200mtr", "cool down", "z1"),
+          step("400y", "warm up", "z1-z2"),
+          rep(12, [step("100y", "strong", "z4"), rest("10s")]),
+          rep(4, [step("50y", "easy", "z1-z2"), rest("15s")]),
+          step("200y", "cool down", "z1"),
         ],
       },
     ],
@@ -922,10 +922,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         durationMin: 50,
         inspiration: "race-pace 100s — specific speed at goal effort",
         blocks: [
-          step("400mtr", "warm up", "z1-z2"),
-          rep(6, [step("50mtr", "descend", "z2-z3"), rest("15s")]),
-          rep(8, [step("100mtr", "race pace", "z4-z5"), rest("20s")]),
-          step("200mtr", "cool down", "z1"),
+          step("400y", "warm up", "z1-z2"),
+          rep(6, [step("50y", "descend", "z2-z3"), rest("15s")]),
+          rep(8, [step("100y", "race pace", "z4-z5"), rest("20s")]),
+          step("200y", "cool down", "z1"),
         ],
       },
       {
@@ -933,10 +933,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         durationMin: 48,
         inspiration: "USRPT-style 50s — high-rep race-pace with short rest",
         blocks: [
-          step("400mtr", "warm up", "z1-z2"),
-          rep(16, [step("50mtr", "race pace", "z5"), rest("20s")]),
-          step("200mtr", "smooth free", "z2"),
-          step("200mtr", "cool down", "z1"),
+          step("400y", "warm up", "z1-z2"),
+          rep(16, [step("50y", "race pace", "z5"), rest("20s")]),
+          step("200y", "smooth free", "z2"),
+          step("200y", "cool down", "z1"),
         ],
       },
     ],
@@ -946,10 +946,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         durationMin: 35,
         inspiration: "race-week feel — short race-pace touches",
         blocks: [
-          step("300mtr", "warm up", "z1-z2"),
-          rep(6, [step("50mtr", "race pace", "z4"), rest("20s")]),
-          step("200mtr", "smooth free", "z2"),
-          step("100mtr", "cool down", "z1"),
+          step("300y", "warm up", "z1-z2"),
+          rep(6, [step("50y", "race pace", "z4"), rest("20s")]),
+          step("200y", "smooth free", "z2"),
+          step("100y", "cool down", "z1"),
         ],
       },
       {
@@ -957,10 +957,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         durationMin: 32,
         inspiration: "a few fast 25s, then long easy swimming for feel",
         blocks: [
-          step("300mtr", "warm up", "z1-z2"),
-          rep(8, [step("25mtr", "fast", "z5"), rest("30s")]),
-          step("300mtr", "smooth free", "z1-z2"),
-          step("100mtr", "cool down", "z1"),
+          step("300y", "warm up", "z1-z2"),
+          rep(8, [step("25y", "fast", "z5"), rest("30s")]),
+          step("300y", "smooth free", "z1-z2"),
+          step("100y", "cool down", "z1"),
         ],
       },
     ],
@@ -970,10 +970,10 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         durationMin: 35,
         inspiration: "easy technique-led recovery swim",
         blocks: [
-          step("300mtr", "warm up", "z1-z2"),
-          rep(6, [step("50mtr", "drill", "z1"), rest("15s")]),
-          step("400mtr", "smooth free", "z2"),
-          step("100mtr", "cool down", "z1"),
+          step("300y", "warm up", "z1-z2"),
+          rep(6, [step("50y", "drill", "z1"), rest("15s")]),
+          step("400y", "smooth free", "z2"),
+          step("100y", "cool down", "z1"),
         ],
       },
       {
@@ -981,9 +981,9 @@ function swimSession(block: TrainingBlock, tier: ReadinessTier): Session {
         durationMin: 35,
         inspiration: "unbroken easy swimming — rhythm and relaxation",
         blocks: [
-          step("200mtr", "warm up", "z1"),
-          step("800mtr", "continuous easy", "z1-z2"),
-          step("100mtr", "cool down", "z1"),
+          step("200y", "warm up", "z1"),
+          step("800y", "continuous easy", "z1-z2"),
+          step("100y", "cool down", "z1"),
         ],
       },
     ],
