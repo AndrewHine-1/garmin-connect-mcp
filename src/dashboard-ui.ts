@@ -214,7 +214,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     </section>
 
     <!-- LOGGER -->
-    <h2 class="section">Today&#39;s habits <span class="muted" id="loggerdate"></span></h2>
+    <h2 class="section">Yesterday&#39;s habits <span class="muted" id="loggerdate"></span></h2>
     <div class="card">
       <div class="logger" id="logger"><div class="muted">Loading…</div></div>
       <div style="display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; align-items:flex-end">
@@ -316,7 +316,7 @@ export const DASHBOARD_HTML = `<!doctype html>
 <script>
 (function(){
   "use strict";
-  var S = { date:null, pinned:"training_readiness", authed:false, sessionExpired:false, autoLogin:false, commands:[], selCmd:null, sessionLog:[], pending:null, journal:null, resultMode:"pretty", lastResult:null, coach:{ settings:null, selected:[], workouts:null, forDate:null }, vo2:{ days:180, data:null } };
+  var S = { date:null, habitDate:null, pinned:"training_readiness", authed:false, sessionExpired:false, autoLogin:false, commands:[], selCmd:null, sessionLog:[], pending:null, journal:null, resultMode:"pretty", lastResult:null, coach:{ settings:null, selected:[], workouts:null, forDate:null }, vo2:{ days:180, data:null } };
 
   function qs(s){ return document.querySelector(s); }
   function esc(v){ return String(v==null?"":v).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c]; }); }
@@ -425,7 +425,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     if(v==="PRIMED") line="You're primed — your body is ready for load today.";
     else if(v==="STEADY") line="You're steady — fine for moderate effort, listen to your body.";
     else line="You're strained — favor recovery over intensity today.";
-    sub = loggedCount>0 ? (loggedCount+" habit"+(loggedCount===1?"":"s")+" logged for this day.") : "No habits logged for this day yet — log below to build your insights.";
+    sub = loggedCount>0 ? (loggedCount+" habit"+(loggedCount===1?"":"s")+" logged for yesterday.") : "No habits logged for yesterday yet — log below to build your insights.";
     return [line, sub];
   }
 
@@ -445,7 +445,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       var byKey={}; (snap.metrics||[]).forEach(function(m){ byKey[m.key]=m; });
       var rdy = byKey.training_readiness ? byKey.training_readiness.value : null;
       renderRing(rdy);
-      var loggedCount = S.journal && S.journal.byDate && S.journal.byDate[S.date] ? Object.keys(S.journal.byDate[S.date]).length : 0;
+      var loggedCount = S.journal && S.journal.byDate && S.journal.byDate[S.habitDate] ? Object.keys(S.journal.byDate[S.habitDate]).length : 0;
       var cs=coachSentence(rdy, loggedCount);
       qs("#coachline").textContent=cs[0]; qs("#coachsub").textContent=cs[1];
 
@@ -486,9 +486,9 @@ export const DASHBOARD_HTML = `<!doctype html>
   }
 
   function renderLogger(){
-    qs("#loggerdate").textContent = S.date===todayISO() ? "(today)" : ("("+S.date+")");
+    qs("#loggerdate").textContent = S.habitDate===shiftDate(todayISO(),-1) ? "(yesterday)" : ("("+S.habitDate+")");
     var j=S.journal; if(!j){ qs("#logger").innerHTML='<div class="muted">Loading…</div>'; return; }
-    var todayVals = (j.byDate && j.byDate[S.date]) || {};
+    var todayVals = (j.byDate && j.byDate[S.habitDate]) || {};
     if(!j.habits || !j.habits.length){ qs("#logger").innerHTML='<div class="muted">No habits yet — add one below to start tracking.</div>'; return; }
     var rows = j.habits.map(function(h){
       var cur = todayVals[h.id];
@@ -524,7 +524,7 @@ export const DASHBOARD_HTML = `<!doctype html>
   function flashSaved(id){ var t=qs("#save-"+CSS.escape(id)); if(t){ t.classList.add("show"); setTimeout(function(){ t.classList.remove("show"); },1200); } }
 
   function logHabitValue(habitId, value){
-    run("log-habit",{ habit:habitId, value:value, date:S.date }, function(res){
+    run("log-habit",{ habit:habitId, value:value, date:S.habitDate }, function(res){
       if(res && res.ok){ flashSaved(habitId); toast("Saved"); loadJournalThen(function(){ renderLogger(); renderHistory(); loadSnapshot(); }); }
       else if(res && !res.needsLogin){ toast(res.error||"Could not save"); }
     });
@@ -550,8 +550,8 @@ export const DASHBOARD_HTML = `<!doctype html>
     Array.prototype.forEach.call(document.querySelectorAll(".cell[data-eh]"), function(c){
       c.addEventListener("click", function(){
         var id=c.getAttribute("data-eh"), d=c.getAttribute("data-ed");
-        S.date=d; qs("#dinput").value=d;
-        renderLogger(); loadSnapshot();
+        S.habitDate=d;
+        renderLogger();
         window.scrollTo({ top:0, behavior:"smooth" });
         toast("Editing "+d);
       });
@@ -961,11 +961,13 @@ export const DASHBOARD_HTML = `<!doctype html>
     }
   }
 
-  function setDate(d){ S.date=d; qs("#dinput").value=d; qs("#loggerdate").textContent = d===todayISO()?"(today)":("("+d+")"); qs("#coachdate").textContent = "· workouts for "+(d===todayISO()?"today":d); renderLogger(); if(S.authed){ loadSnapshot(); } }
+  function setDate(d){ S.date=d; qs("#dinput").value=d; qs("#coachdate").textContent = "· workouts for "+(d===todayISO()?"today":d); if(S.authed){ loadSnapshot(); } }
 
   function init(){
     S.date=todayISO();
+    S.habitDate=shiftDate(todayISO(),-1);
     qs("#dinput").value=S.date;
+    qs("#loggerdate").textContent = S.habitDate===shiftDate(todayISO(),-1) ? "(yesterday)" : ("("+S.habitDate+")");
     qs("#dprev").onclick=function(){ setDate(shiftDate(S.date,-1)); };
     qs("#dnext").onclick=function(){ setDate(shiftDate(S.date,1)); };
     qs("#dtoday").onclick=function(){ setDate(todayISO()); };
