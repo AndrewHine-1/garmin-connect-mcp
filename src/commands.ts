@@ -18,13 +18,11 @@ import {
   unlogHabit,
 } from "./journal.js";
 import {
-  DEFAULT_METRIC,
-  metricKeys,
-  getMetric,
-  fetchMetricSeries,
-  metricFetchDates,
-} from "./recovery-metrics.js";
-import { analyzeHabit, formatDetailed } from "./analysis.js";
+  analyzeHabitRow,
+  buildHabitMatrix,
+  fetchAdjustedInputs,
+  outcomeMeta,
+} from "./analysis.js";
 import {
   loadCoachSettings,
   saveCoachSettings,
@@ -115,14 +113,6 @@ const P_ACTIVITY_ID: ParamDef = {
   type: "string",
   required: true,
   description: "Activity ID (from list-activities)",
-};
-const P_METRIC: ParamDef = {
-  name: "metric",
-  type: "enum",
-  required: false,
-  default: DEFAULT_METRIC,
-  enumValues: metricKeys(),
-  description: "Recovery metric to correlate against",
 };
 const P_RANGE_START: ParamDef = {
   name: "startDate",
@@ -803,11 +793,10 @@ export const COMMANDS: CommandDef[] = [
     name: "analyze-habit",
     group: "Habit Journal",
     description:
-      "Correlate ONE habit with a recovery metric (t-test / correlation)",
+      "Confounder-adjusted effect of ONE habit on readiness, sleep, and stress",
     needsAuth: true,
     params: [
       { name: "habit", type: "string", required: true },
-      P_METRIC,
       P_RANGE_START,
       P_RANGE_END,
     ],
@@ -816,8 +805,6 @@ export const COMMANDS: CommandDef[] = [
       const habit = findHabit(data, reqStr(ctx, "habit"));
       if (!habit)
         throw new Error(`No habit matching "${reqStr(ctx, "habit")}".`);
-      const metric = optStr(ctx, "metric") ?? DEFAULT_METRIC;
-      const metricDef = getMetric(metric);
       const end = optStr(ctx, "endDate") ?? ctx.today;
       const start = optStr(ctx, "startDate") ?? daysAgoIso(60);
       const habitDates = loggedDates(data, start, end).filter(
@@ -828,51 +815,64 @@ export const COMMANDS: CommandDef[] = [
           `No logged days for "${habit.name}" between ${start} and ${end}.`
         );
       }
-      const series = await fetchMetricSeries(
+      const { loadMap, seriesByOutcome } = await fetchAdjustedInputs(
         ctx.requireClient(),
-        metric,
-        metricFetchDates(metric, habitDates)
+        habitDates,
+        start,
+        end
       );
-      const result = analyzeHabit(data, habit, metricDef, series, start, end);
-      return { ...result, text: formatDetailed(result, metricDef) };
+      const habitRow = analyzeHabitRow(
+        data,
+        habit,
+        seriesByOutcome,
+        loadMap,
+        start,
+        end
+      );
+      return {
+        startDate: start,
+        endDate: end,
+        outcomes: outcomeMeta(),
+        habit: habitRow,
+      };
     },
   },
   {
     name: "analyze-habits",
     group: "Habit Journal",
-    description: "Rank ALL habits by their effect on a recovery metric",
+    description:
+      "Confounder-adjusted effect of ALL habits on readiness, sleep, and stress",
     needsAuth: true,
-    params: [P_METRIC, P_RANGE_START, P_RANGE_END],
+    params: [P_RANGE_START, P_RANGE_END],
     run: async (ctx) => {
       const data = loadJournal();
       if (data.habits.length === 0) throw new Error("No habits defined yet.");
-      const metric = optStr(ctx, "metric") ?? DEFAULT_METRIC;
-      const metricDef = getMetric(metric);
       const end = optStr(ctx, "endDate") ?? ctx.today;
       const start = optStr(ctx, "startDate") ?? daysAgoIso(60);
       const dates = loggedDates(data, start, end);
       if (dates.length === 0) {
         throw new Error(`No logged habit days between ${start} and ${end}.`);
       }
-      const series = await fetchMetricSeries(
+      const { loadMap, seriesByOutcome } = await fetchAdjustedInputs(
         ctx.requireClient(),
-        metric,
-        metricFetchDates(metric, dates)
+        dates,
+        start,
+        end
       );
-      const results = data.habits.map((h) =>
-        analyzeHabit(data, h, metricDef, series, start, end)
+      const habits = buildHabitMatrix(
+        data,
+        data.habits,
+        seriesByOutcome,
+        loadMap,
+        start,
+        end
       );
-      const coverage = [...series.values()].filter((v) => v != null).length;
       return {
-        metric,
-        metricLabel: metricDef.label,
-        unit: metricDef.unit,
-        higherIsBetter: metricDef.higherIsBetter,
         startDate: start,
         endDate: end,
         loggedDays: dates.length,
-        metricCoverage: coverage,
-        results,
+        outcomes: outcomeMeta(),
+        habits,
       };
     },
   },

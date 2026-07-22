@@ -110,13 +110,11 @@ export const DASHBOARD_HTML = `<!doctype html>
 
   /* tiles */
   .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
-  .tile { cursor:pointer; position:relative; }
-  .tile.pinned { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .tile { position:relative; }
   .tile .label { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text2); }
   .tile .v { font-size:30px; font-weight:600; margin-top:4px; }
   .tile .u { font-size:12px; color:var(--text2); margin-left:4px; }
   .tile .nodata { font-size:13px; color:var(--dim); margin-top:8px; }
-  .tile .pinhint { position:absolute; top:12px; right:12px; font-size:10px; color:var(--dim); }
   .band-good { color:var(--good); } .band-warn { color:var(--warn); } .band-bad { color:var(--bad); }
 
   /* analyze table */
@@ -134,6 +132,13 @@ export const DASHBOARD_HTML = `<!doctype html>
   .coachpick { background:linear-gradient(90deg,rgba(31,169,140,.12),transparent); border:1px solid rgba(31,169,140,.35); border-radius:10px; padding:12px 14px; margin-bottom:12px; }
   .coachpick b { color:var(--accent); }
   .disclaimer { font-size:11px; color:var(--dim); margin-top:10px; }
+  /* adjusted habit matrix */
+  table.mtx td, table.mtx th { vertical-align:top; white-space:nowrap; }
+  table.mtx .hname { font-weight:500; color:var(--text); }
+  .mtx .mcell.weakcell { opacity:.5; }
+  .mtx .mpct { font-weight:600; font-variant-numeric:tabular-nums; margin-right:4px; }
+  .mtx .mnone { color:var(--dim); font-size:12px; }
+  .mtx .msd, .mtx .mreason { display:block; font-size:10px; color:var(--dim); font-weight:400; margin-top:2px; }
 
   /* history grid */
   .grid { overflow-x:auto; }
@@ -251,7 +256,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     </div>
 
     <!-- RECOVERY TILES -->
-    <h2 class="section">Recovery glance <span class="muted">· click a tile to correlate habits against it</span></h2>
+    <h2 class="section">Recovery glance <span class="muted">· today&#39;s readiness, sleep &amp; stress at a glance</span></h2>
     <div class="tiles" id="tiles"><div class="muted">Loading…</div></div>
 
     <!-- ANALYZE -->
@@ -316,7 +321,7 @@ export const DASHBOARD_HTML = `<!doctype html>
 <script>
 (function(){
   "use strict";
-  var S = { date:null, habitDate:null, pinned:"training_readiness", authed:false, sessionExpired:false, autoLogin:false, commands:[], selCmd:null, sessionLog:[], pending:null, journal:null, resultMode:"pretty", lastResult:null, coach:{ settings:null, selected:[], workouts:null, forDate:null }, vo2:{ days:180, data:null } };
+  var S = { date:null, habitDate:null, authed:false, sessionExpired:false, autoLogin:false, commands:[], selCmd:null, sessionLog:[], pending:null, journal:null, resultMode:"pretty", lastResult:null, coach:{ settings:null, selected:[], workouts:null, forDate:null }, vo2:{ days:180, data:null } };
 
   function qs(s){ return document.querySelector(s); }
   function esc(v){ return String(v==null?"":v).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c]; }); }
@@ -452,23 +457,17 @@ export const DASHBOARD_HTML = `<!doctype html>
       var order=["sleep_score","hrv","resting_hr","stress_avg"];
       var html=order.map(function(k){
         var m=byKey[k]; if(!m) return "";
-        var pinned = S.pinned===k ? " pinned" : "";
         var inner;
         if(m.value==null){ inner='<div class="nodata">No data — not synced for this day.</div>'; }
         else { inner='<div class="v num '+tileBandClass(k,m.value)+'">'+esc(m.value)+'<span class="u">'+esc(m.unit.split(" ")[0])+'</span></div>'; }
-        return '<div class="card tile'+pinned+'" data-metric="'+k+'"><div class="label">'+esc(m.label)+'</div>'+inner+'<div class="pinhint">'+(S.pinned===k?"pinned":"pin")+'</div></div>';
+        return '<div class="card tile" data-metric="'+k+'"><div class="label">'+esc(m.label)+'</div>'+inner+'</div>';
       }).join("");
-      // readiness tile too (so all 5 are pinnable)
       var rm=byKey.training_readiness;
       if(rm){
-        var pr=S.pinned==="training_readiness"?" pinned":"";
         var rin = rm.value==null?'<div class="nodata">No data.</div>':'<div class="v num '+tileBandClass("training_readiness",rm.value)+'">'+esc(rm.value)+'</div>';
-        html = '<div class="card tile'+pr+'" data-metric="training_readiness"><div class="label">'+esc(rm.label)+'</div>'+rin+'<div class="pinhint">'+(S.pinned==="training_readiness"?"pinned":"pin")+'</div></div>' + html;
+        html = '<div class="card tile" data-metric="training_readiness"><div class="label">'+esc(rm.label)+'</div>'+rin+'</div>' + html;
       }
       qs("#tiles").innerHTML = html || '<div class="muted">No metrics.</div>';
-      Array.prototype.forEach.call(document.querySelectorAll(".tile"), function(t){
-        t.addEventListener("click", function(){ S.pinned=t.getAttribute("data-metric"); loadSnapshot(); loadAnalysis(); });
-      });
     });
   }
 
@@ -558,65 +557,44 @@ export const DASHBOARD_HTML = `<!doctype html>
     });
   }
 
-  // ---------- analyze-habits ----------
-  function effChip(dir){ if(dir>0) return '<span class="eff-up">&#8593; better</span>'; if(dir<0) return '<span class="eff-down">&#8595; worse</span>'; return '<span class="eff-none">~ none</span>'; }
+  // ---------- analyze-habits (confounder-adjusted 3-outcome matrix) ----------
   function confDots(conf){
     var n = conf==="high"?3:conf==="medium"?2:conf==="low"?1:0;
     var fillCls = conf==="high"?"f-good":conf==="medium"?"f-warn":conf==="low"?"f-bad":"";
-    var s='<span class="conf">'; for(var i=0;i<3;i++){ s+='<span class="d'+(i<n?(" "+fillCls):"")+'"></span>'; } s+=' '+esc(conf)+'</span>'; return s;
+    var s='<span class="conf">'; for(var i=0;i<3;i++){ s+='<span class="d'+(i<n?(" "+fillCls):"")+'"></span>'; } s+='</span>'; return s;
   }
-  function magCell(a){
-    if(a.group){
-      var g=a.group, pct = (g.meanWithout!==0 && isFinite(g.percentChange)) ? ((g.percentChange>=0?"+":"")+g.percentChange.toFixed(1)+"%") : ((g.delta>=0?"+":"")+g.delta.toFixed(1));
-      return '<span class="mag">'+esc(pct)+'</span>';
+  function matrixCell(cell, isNumeric){
+    if(!cell || cell.tier==="none"){
+      var why=(cell&&cell.reason)||"not enough data";
+      return '<td class="mnone" title="'+esc(why)+'">—<span class="mreason">'+esc(why)+'</span></td>';
     }
-    if(a.correlation){
-      var r=a.correlation.r, left=((r+1)/2*100).toFixed(0);
-      return '<span class="mag">r='+r.toFixed(2)+'</span><span class="rbar"><i style="left:'+left+'%"></i></span>';
-    }
-    return '<span class="muted">—</span>';
+    var p=cell.percent, sign=p>=0?"+":"";
+    var cls=p>=0?"eff-up":"eff-down";
+    var dim=cell.tier==="weak"?" weakcell":"";
+    var sd=(isNumeric && cell.sd!=null)?'<span class="msd">per ±'+cell.sd+'</span>':"";
+    var reason=(cell.tier==="weak" && cell.reason)?'<span class="mreason">'+esc(cell.reason)+'</span>':"";
+    return '<td class="mcell'+dim+'"><span class="mpct '+cls+'">'+sign+p+'%</span> '+confDots(cell.confidence)+sd+reason+'</td>';
   }
-  function neededDays(a){
-    if(a.group){ var need=Math.max(0, 4-Math.min(a.group.nWith,a.group.nWithout)); return need>0?("needs ~"+need+" more split days"):""; }
-    if(a.correlation){ var n2=Math.max(0,8-a.correlation.n); return n2>0?("needs ~"+n2+" more days"):""; }
-    return "log more days";
-  }
-
   function loadAnalysis(){
-    var metricName = S.pinned;
-    qs("#analyzecard").innerHTML='<div class="muted">Analyzing against '+esc(metricName)+'…</div>';
-    run("analyze-habits",{ metric:metricName }, function(res){
+    qs("#analyzecard").innerHTML='<div class="muted">Analyzing (adjusting for alcohol, weekend &amp; training load)…</div>';
+    run("analyze-habits",{}, function(res){
       if(!res || !res.ok){
         if(res && res.needsLogin){ qs("#analyzecard").innerHTML='<div class="muted">Log in to Garmin to see habit insights.</div>'; return; }
         qs("#analyzecard").innerHTML='<div class="muted">'+esc((res&&res.error)||"Could not analyze. Log some habit days first.")+'</div>';
         return;
       }
-      var d=res.result, rows=(d.results||[]).slice();
-      // rank: confidence then magnitude
-      var crank={high:3,medium:2,low:1,inconclusive:0};
-      rows.sort(function(a,b){
-        var ca=(a.group&&a.group.confidence)||(a.correlation&&a.correlation.confidence)||"inconclusive";
-        var cb=(b.group&&b.group.confidence)||(b.correlation&&b.correlation.confidence)||"inconclusive";
-        return (crank[cb]-crank[ca]);
-      });
-      var pick=rows.find(function(r){ var c=(r.group&&r.group.confidence)||(r.correlation&&r.correlation.confidence); return c==="high"||c==="medium"; });
-      var pickHtml="";
-      if(pick){
-        pickHtml='<div class="coachpick">Coach&#39;s pick: <b>'+esc(pick.habitName)+'</b> shows the clearest link to your '+esc(d.metricLabel)+' — '+effChip(pick.recoveryDirection)+' recovery.</div>';
-      }
-      var head='<tr><th>Habit</th><th>Days</th><th>Effect on recovery</th><th>Magnitude</th><th>Confidence</th></tr>';
-      var body=rows.map(function(a){
-        var conf=(a.group&&a.group.confidence)||(a.correlation&&a.correlation.confidence)||"inconclusive";
-        var low = (conf==="low"||conf==="inconclusive") ? " low":"";
-        var note = a.note ? '<span class="muted"> · '+esc(neededDays(a))+'</span>' : (low?'<span class="muted"> · '+esc(neededDays(a))+'</span>':"");
-        if(a.note){
-          return '<tr class="low"><td>'+esc(a.habitName)+'</td><td class="num">'+a.daysAnalyzed+'</td><td colspan="3" class="muted">not enough data · '+esc(neededDays(a))+'</td></tr>';
-        }
-        return '<tr class="'+low+'"><td>'+esc(a.habitName)+note+'</td><td class="num">'+a.daysAnalyzed+'</td><td>'+effChip(a.recoveryDirection)+'</td><td>'+magCell(a)+'</td><td>'+confDots(conf)+'</td></tr>';
+      var d=res.result;
+      var cols=d.outcomes||[];
+      var colHdr={ recovery:"Recovery", sleep:"Sleep", stress:"Stress" };
+      var head='<tr><th>Habit</th>'+cols.map(function(o){ return '<th>'+esc(colHdr[o.cellKey]||o.label)+(o.cellKey==="stress"?' <span class="muted" style="font-weight:400">(lower)</span>':'')+'</th>'; }).join("")+'</tr>';
+      var body=(d.habits||[]).map(function(h){
+        var isNum=h.type==="numeric";
+        var tds=cols.map(function(o){ return matrixCell(h.cells[o.cellKey], isNum); }).join("");
+        return '<tr><td class="hname">'+esc(h.habitName)+'</td>'+tds+'</tr>';
       }).join("");
-      var meta='<div class="muted" style="font-size:12px;margin-bottom:10px">Effect on: <b style="color:var(--accent)">'+esc(d.metricLabel)+'</b> · '+d.loggedDays+' logged days · '+d.metricCoverage+' with metric data ('+esc(d.startDate)+' → '+esc(d.endDate)+')</div>';
-      qs("#analyzecard").innerHTML = pickHtml + meta + '<table class="an">'+head+body+'</table>'
-        + '<div class="disclaimer">Log a habit on the day you did it — overnight metrics (readiness, sleep, HRV, resting HR) are matched to the <b>next morning</b>; stress is same-day. Boolean: % change on habit days vs. not (Welch t-test); numeric: Pearson r. Direction accounts for metrics where lower is better. Correlation is not causation.</div>';
+      var metaLine='<div class="muted" style="font-size:12px;margin-bottom:10px">Isolated effect of each habit — <b>adjusted for alcohol, weekend &amp; training load</b> · '+d.loggedDays+' logged days ('+esc(d.startDate)+' → '+esc(d.endDate)+') · + = better</div>';
+      qs("#analyzecard").innerHTML = metaLine + '<div class="grid"><table class="an mtx">'+head+body+'</table></div>'
+        + '<div class="disclaimer">Each cell is one habit&#39;s effect on that score from a regression holding alcohol, weekend &amp; training load constant. Numeric habits show the effect per &plusmn;1 SD of the input; stress is sign-flipped so + = calmer. Confidence is the coefficient&#39;s p-value — on a short log even &ldquo;high&rdquo; cells are noisy, so keep logging. Association, not proof of cause.</div>';
     });
   }
 

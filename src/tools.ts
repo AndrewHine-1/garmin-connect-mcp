@@ -20,13 +20,11 @@ import {
   getJournalFile,
 } from "./journal.js";
 import {
-  DEFAULT_METRIC,
-  fetchMetricSeries,
-  metricFetchDates,
-  getMetric,
-  metricKeys,
-} from "./recovery-metrics.js";
-import { analyzeHabit, formatDetailed, formatRow } from "./analysis.js";
+  analyzeHabitRow,
+  buildHabitMatrix,
+  fetchAdjustedInputs,
+  outcomeMeta,
+} from "./analysis.js";
 export { registerResources } from "./resources.js";
 
 function jsonResult(data: unknown) {
@@ -52,13 +50,6 @@ function daysAgo(n: number): string {
   d.setUTCDate(d.getUTCDate() - n);
   return d.toISOString().slice(0, 10);
 }
-
-const CONFIDENCE_RANK: Record<string, number> = {
-  high: 3,
-  medium: 2,
-  low: 1,
-  inconclusive: 0,
-};
 
 function getClient() {
   if (!sessionExists()) {
@@ -1089,22 +1080,18 @@ Example with RepeatGroupDTO for intervals:
 
   server.tool(
     "analyze-habit",
-    `Analyze how ONE habit affects a recovery metric (Whoop Journal style). Log a habit on the day you did it; overnight-recovery metrics (training readiness, sleep, HRV, resting HR) are automatically matched to the NEXT morning's value (the night the behavior affected), while same-day stress is matched same-day. Runs a two-sample t-test (boolean habits) or Pearson correlation (numeric habits) and reports the effect size and confidence.
+    `Confounder-adjusted analysis of how ONE habit affects your recovery, across THREE outcomes at once: training readiness, sleep score, and average stress. For each outcome it fits an OLS regression (outcome ~ habit + alcohol + weekend + daily training load) and reports the habit's ISOLATED effect as a signed percent (+ = better for all three, including stress) with a confidence tier. Log a habit on the day you did it; overnight outcomes (readiness, sleep) are matched to the NEXT morning automatically, stress is same-day.
 
-Metrics: ${metricKeys().join(", ")} (default: ${DEFAULT_METRIC}). Defaults to the last 60 days. Requires a valid Garmin session (run check-session first).`,
+Defaults to the last 60 days. Requires a valid Garmin session (run check-session first).`,
     {
       habit: z.string().describe("Habit name or id"),
-      metric: z
-        .string()
-        .default(DEFAULT_METRIC)
-        .describe(`Recovery metric: ${metricKeys().join(", ")}`),
       startDate: z
         .string()
         .optional()
         .describe("YYYY-MM-DD, defaults to 60 days ago"),
       endDate: z.string().optional().describe("YYYY-MM-DD, defaults to today"),
     },
-    async ({ habit, metric, startDate, endDate }) => {
+    async ({ habit, startDate, endDate }) => {
       try {
         const data = loadJournal();
         const h = findHabit(data, habit);
@@ -1113,7 +1100,6 @@ Metrics: ${metricKeys().join(", ")} (default: ${DEFAULT_METRIC}). Defaults to th
             `No habit matching "${habit}". Use list-habits, or create it with add-habit.`
           );
         }
-        const metricDef = getMetric(metric);
         const end = endDate ?? todayDate();
         const start = startDate ?? daysAgo(60);
         const habitDates = loggedDates(data, start, end).filter(
@@ -1124,14 +1110,26 @@ Metrics: ${metricKeys().join(", ")} (default: ${DEFAULT_METRIC}). Defaults to th
             `No logged days for "${h.name}" between ${start} and ${end}. Log some days with log-habit first.`
           );
         }
-        const client = getClient();
-        const series = await fetchMetricSeries(
-          client,
-          metric,
-          metricFetchDates(metric, habitDates)
+        const { loadMap, seriesByOutcome } = await fetchAdjustedInputs(
+          getClient(),
+          habitDates,
+          start,
+          end
         );
-        const result = analyzeHabit(data, h, metricDef, series, start, end);
-        return textResult(formatDetailed(result, metricDef));
+        const habitRow = analyzeHabitRow(
+          data,
+          h,
+          seriesByOutcome,
+          loadMap,
+          start,
+          end
+        );
+        return jsonResult({
+          startDate: start,
+          endDate: end,
+          outcomes: outcomeMeta(),
+          habit: habitRow,
+        });
       } catch (e) {
         return errorResult(e instanceof Error ? e.message : String(e));
       }
@@ -1140,21 +1138,17 @@ Metrics: ${metricKeys().join(", ")} (default: ${DEFAULT_METRIC}). Defaults to th
 
   server.tool(
     "analyze-habits",
-    `Overview: analyze ALL your habits against one recovery metric at once (the Whoop "behaviors" dashboard). Log habits on the day you did them; overnight-recovery metrics are matched to the NEXT morning automatically (stress is same-day). Ranks every habit by confidence and effect size.
+    `Confounder-adjusted overview of ALL your habits across THREE recovery outcomes at once: training readiness, sleep score, and average stress. For each habit × outcome it fits an OLS regression (outcome ~ habit + alcohol + weekend + daily training load) and reports the habit's ISOLATED effect as a signed percent (+ = better for all three, including stress) with a confidence tier. Log habits on the day you did them; overnight outcomes are matched to the NEXT morning automatically, stress is same-day.
 
-Metrics: ${metricKeys().join(", ")} (default: ${DEFAULT_METRIC}). Defaults to the last 60 days. Requires a valid Garmin session (run check-session first).`,
+Defaults to the last 60 days. Requires a valid Garmin session (run check-session first).`,
     {
-      metric: z
-        .string()
-        .default(DEFAULT_METRIC)
-        .describe(`Recovery metric: ${metricKeys().join(", ")}`),
       startDate: z
         .string()
         .optional()
         .describe("YYYY-MM-DD, defaults to 60 days ago"),
       endDate: z.string().optional().describe("YYYY-MM-DD, defaults to today"),
     },
-    async ({ metric, startDate, endDate }) => {
+    async ({ startDate, endDate }) => {
       try {
         const data = loadJournal();
         if (data.habits.length === 0) {
@@ -1162,7 +1156,6 @@ Metrics: ${metricKeys().join(", ")} (default: ${DEFAULT_METRIC}). Defaults to th
             "No habits defined yet. Create one with add-habit."
           );
         }
-        const metricDef = getMetric(metric);
         const end = endDate ?? todayDate();
         const start = startDate ?? daysAgo(60);
         const dates = loggedDates(data, start, end);
@@ -1171,45 +1164,27 @@ Metrics: ${metricKeys().join(", ")} (default: ${DEFAULT_METRIC}). Defaults to th
             `No logged habit days between ${start} and ${end}. Log some days with log-habit first.`
           );
         }
-        const client = getClient();
-        const series = await fetchMetricSeries(
-          client,
-          metric,
-          metricFetchDates(metric, dates)
+        const { loadMap, seriesByOutcome } = await fetchAdjustedInputs(
+          getClient(),
+          dates,
+          start,
+          end
         );
-        const analyses = data.habits.map((h) =>
-          analyzeHabit(data, h, metricDef, series, start, end)
+        const habits = buildHabitMatrix(
+          data,
+          data.habits,
+          seriesByOutcome,
+          loadMap,
+          start,
+          end
         );
-        analyses.sort((a, b) => {
-          const ca =
-            a.group?.confidence ?? a.correlation?.confidence ?? "inconclusive";
-          const cb =
-            b.group?.confidence ?? b.correlation?.confidence ?? "inconclusive";
-          const rankDiff =
-            (CONFIDENCE_RANK[cb] ?? 0) - (CONFIDENCE_RANK[ca] ?? 0);
-          if (rankDiff !== 0) return rankDiff;
-          const ma = Math.abs(
-            a.group?.percentChange ??
-              (a.correlation ? a.correlation.r * 100 : 0)
-          );
-          const mb = Math.abs(
-            b.group?.percentChange ??
-              (b.correlation ? b.correlation.r * 100 : 0)
-          );
-          return (isFinite(mb) ? mb : 0) - (isFinite(ma) ? ma : 0);
+        return jsonResult({
+          startDate: start,
+          endDate: end,
+          loggedDays: dates.length,
+          outcomes: outcomeMeta(),
+          habits,
         });
-        const coverage = [...series.values()].filter((v) => v != null).length;
-        const rows = analyses.map(formatRow).join("\n");
-        const text = `# Habit insights → ${metricDef.label}
-
-Range: ${start} → ${end} · ${dates.length} logged days · ${coverage} with ${metricDef.label} data
-
-| Habit | Days | Effect on recovery | Magnitude | Confidence |
-|---|---|---|---|---|
-${rows}
-
-_Magnitude: boolean habits show % change vs. days without; numeric habits show Pearson r. "Effect on recovery" already accounts for metrics where lower is better (resting HR, stress). Higher confidence = lower p-value. Correlation isn't causation — use this to spot patterns, then confirm by logging more._`;
-        return textResult(text);
       } catch (e) {
         return errorResult(e instanceof Error ? e.message : String(e));
       }
