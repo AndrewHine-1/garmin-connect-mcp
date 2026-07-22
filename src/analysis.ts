@@ -150,9 +150,15 @@ export function estimateOutcome(
   endDate: string
 ): OutcomeCell {
   const isAlcohol = habit.id === ALCOHOL_HABIT_ID;
+  // Only adjust for alcohol when it's actually logged AND isn't the habit under
+  // test (a confounder is dropped from its own model). A journal with no alcohol
+  // habit still gets estimates — it just omits that covariate.
+  const useAlcohol =
+    !isAlcohol && data.habits.some((h) => h.id === ALCOHOL_HABIT_ID);
 
-  // Listwise deletion: keep a day only if habit, outcome (at D+lag) and alcohol
-  // are all present. Load is 0 when absent; weekend is always known.
+  // Listwise deletion: keep a day only if habit and outcome (at D+lag) are
+  // present — plus alcohol when we're adjusting for it. Load is 0 when absent;
+  // weekend is always known.
   const rows: UsableRow[] = [];
   for (const { date, value } of habitSeries(
     data,
@@ -162,11 +168,15 @@ export function estimateOutcome(
   )) {
     const y = metricSeries.get(shiftISODate(date, metric.lagDays));
     if (y == null) continue;
-    const alcRaw = data.entries[date]?.[ALCOHOL_HABIT_ID];
-    if (alcRaw == null) continue;
+    let alcohol = 0;
+    if (useAlcohol) {
+      const alcRaw = data.entries[date]?.[ALCOHOL_HABIT_ID];
+      if (alcRaw == null) continue;
+      alcohol = toNum(alcRaw);
+    }
     rows.push({
       habit: toNum(value),
-      alcohol: toNum(alcRaw),
+      alcohol,
       weekend: isWeekend(date),
       load: loadMap.get(date) ?? 0,
       y,
@@ -186,7 +196,7 @@ export function estimateOutcome(
   if (habit.type === "boolean") {
     const yes = habitVals.filter((v) => v === 1).length;
     const no = n - yes;
-    if (yes === 0 && no === 0) {
+    if (yes === 0 || no === 0) {
       return { tier: "none", reason: "no variation yet" };
     }
     if (yes < MIN_GROUP) {
@@ -204,7 +214,7 @@ export function estimateOutcome(
   const columns: { name: string; vals: number[] }[] = [
     { name: "habit", vals: habitVals },
   ];
-  if (!isAlcohol) {
+  if (useAlcohol) {
     columns.push({ name: "alcohol", vals: rows.map((r) => r.alcohol) });
   }
   columns.push({ name: "weekend", vals: rows.map((r) => r.weekend) });

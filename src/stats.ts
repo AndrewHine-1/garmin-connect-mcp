@@ -112,106 +112,9 @@ export function confidenceLabel(p: number): string {
   return "inconclusive";
 }
 
-export interface GroupComparison {
-  nWith: number;
-  nWithout: number;
-  meanWith: number;
-  meanWithout: number;
-  delta: number; // meanWith - meanWithout
-  percentChange: number; // delta relative to meanWithout
-  t: number;
-  df: number;
-  pValue: number;
-  cohensD: number;
-  confidence: string;
-}
-
-/**
- * Welch's unequal-variance two-sample t-test, comparing the recovery metric on
- * days the habit happened (`withHabit`) vs days it didn't (`without`).
- */
-export function compareGroups(
-  withHabit: number[],
-  without: number[]
-): GroupComparison | null {
-  if (withHabit.length < 2 || without.length < 2) return null;
-  const n1 = withHabit.length;
-  const n2 = without.length;
-  const m1 = mean(withHabit);
-  const m2 = mean(without);
-  const v1 = variance(withHabit);
-  const v2 = variance(without);
-
-  const se = Math.sqrt(v1 / n1 + v2 / n2);
-  let t: number;
-  let df: number;
-  if (se === 0) {
-    // No variance in either group; treat any mean difference as decisive.
-    t = m1 === m2 ? 0 : Infinity;
-    df = n1 + n2 - 2;
-  } else {
-    t = (m1 - m2) / se;
-    df =
-      Math.pow(v1 / n1 + v2 / n2, 2) /
-      (Math.pow(v1 / n1, 2) / (n1 - 1) + Math.pow(v2 / n2, 2) / (n2 - 1));
-  }
-  const pValue = tDistTwoTailedP(t, df);
-
-  // Pooled SD for Cohen's d.
-  const pooledSd = Math.sqrt(((n1 - 1) * v1 + (n2 - 1) * v2) / (n1 + n2 - 2));
-  const cohensD = pooledSd === 0 ? 0 : (m1 - m2) / pooledSd;
-
-  return {
-    nWith: n1,
-    nWithout: n2,
-    meanWith: m1,
-    meanWithout: m2,
-    delta: m1 - m2,
-    percentChange: m2 === 0 ? NaN : ((m1 - m2) / m2) * 100,
-    t,
-    df,
-    pValue,
-    cohensD,
-    confidence: confidenceLabel(pValue),
-  };
-}
-
-export interface Correlation {
-  n: number;
-  r: number;
-  t: number;
-  df: number;
-  pValue: number;
-  confidence: string;
-}
-
-/**
- * Pearson correlation between a numeric habit value and the recovery metric,
- * with a t-test on r for significance. `xs` and `ys` must be paired/same length.
- */
-export function correlate(xs: number[], ys: number[]): Correlation | null {
-  const n = Math.min(xs.length, ys.length);
-  if (n < 3) return null;
-  const mx = mean(xs);
-  const my = mean(ys);
-  let sxy = 0;
-  let sxx = 0;
-  let syy = 0;
-  for (let i = 0; i < n; i++) {
-    const dx = xs[i] - mx;
-    const dy = ys[i] - my;
-    sxy += dx * dy;
-    sxx += dx * dx;
-    syy += dy * dy;
-  }
-  if (sxx === 0 || syy === 0) return null; // no variance to correlate
-  const r = sxy / Math.sqrt(sxx * syy);
-  const df = n - 2;
-  const denom = 1 - r * r;
-  const t = denom <= 0 ? Infinity : r * Math.sqrt(df / denom);
-  const pValue = tDistTwoTailedP(t, df);
-  return { n, r, t, df, pValue, confidence: confidenceLabel(pValue) };
-}
+// (The univariate Welch t-test / Pearson correlation that used to live here were
+// retired when habit analysis moved to the confounder-adjusted regression in
+// analysis.ts — single source of truth.)
 
 export interface RegressionCoefficient {
   coefficient: number;
@@ -354,8 +257,12 @@ export function multipleRegression(
   for (let a = 0; a < p; a++) {
     const varA = sigma2 * xtxInv[a][a];
     const stdErr = varA > 0 ? Math.sqrt(varA) : 0;
-    const t = stdErr === 0 ? (beta[a] === 0 ? 0 : Infinity) : beta[a] / stdErr;
-    const pValue = tDistTwoTailedP(t, dfResid);
+    // A zero/non-positive standard error means a degenerate fit (perfect fit
+    // with rss≈0, or a near-singular X'X). Report the coefficient as
+    // inconclusive (NaN t/p) rather than manufacturing t=Infinity / p=0, which
+    // would surface downstream as a spurious "high" confidence.
+    const t = stdErr > 0 ? beta[a] / stdErr : NaN;
+    const pValue = stdErr > 0 ? tDistTwoTailedP(t, dfResid) : NaN;
     coefficients[a] = { coefficient: beta[a], stdErr, t, pValue };
   }
 
