@@ -132,6 +132,21 @@ export interface RegressionResult {
 }
 
 /**
+ * A fitted regression addressed by column NAME rather than by position — the
+ * public regression interface. `coef(name)` is undefined when that column was
+ * absent or dropped as constant/collinear (see `kept`).
+ */
+export interface RegressionFit {
+  n: number;
+  dfResid: number;
+  rSquared: number;
+  /** Predictor names retained after the constant-column drop, in fit order. */
+  kept: string[];
+  /** The fitted coefficient for a predictor, or undefined if it wasn't kept. */
+  coef(name: string): RegressionCoefficient | undefined;
+}
+
+/**
  * Invert a square matrix via Gauss-Jordan elimination with partial pivoting.
  * Returns null if the matrix is singular (a pivot is effectively zero).
  */
@@ -186,8 +201,11 @@ function invertMatrix(matrix: number[][]): number[][] | null {
  * Returns null when the model is not estimable: fewer rows than coefficients,
  * residual degrees of freedom < 1, or a singular X'X (e.g. a constant or
  * perfectly collinear predictor column).
+ *
+ * This is the numeric core. Application code goes through `regress`, which
+ * addresses columns by name and owns the constant-column drop.
  */
-export function multipleRegression(
+function multipleRegression(
   X: number[][],
   y: number[]
 ): RegressionResult | null {
@@ -267,4 +285,38 @@ export function multipleRegression(
   }
 
   return { n, dfResid, rSquared, coefficients };
+}
+
+/**
+ * Ordinary-least-squares regression addressed by column name.
+ *
+ * Drops any constant predictor column (zero variance in this sample) before
+ * fitting — a constant column makes X'X singular — and records the survivors in
+ * `kept`. The returned `coef(name)` looks a predictor up by name, so callers
+ * never depend on column ordering or the intercept-at-[0] convention. Returns
+ * null when the underlying fit is not estimable (see `multipleRegression`).
+ */
+export function regress(
+  columns: { name: string; values: number[] }[],
+  y: number[]
+): RegressionFit | null {
+  const kept = columns.filter((c) => variance(c.values) > 0);
+  const X = y.map((_, i) => kept.map((c) => c.values[i]));
+  const reg = multipleRegression(X, y);
+  if (!reg) return null;
+
+  // coefficients[0] is the intercept; kept[i] is coefficients[i + 1].
+  const indexByName = new Map<string, number>();
+  kept.forEach((c, i) => indexByName.set(c.name, i + 1));
+
+  return {
+    n: reg.n,
+    dfResid: reg.dfResid,
+    rSquared: reg.rSquared,
+    kept: kept.map((c) => c.name),
+    coef(name: string) {
+      const i = indexByName.get(name);
+      return i === undefined ? undefined : reg.coefficients[i];
+    },
+  };
 }

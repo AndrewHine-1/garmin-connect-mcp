@@ -19,15 +19,9 @@
 // over the window so per-habit estimation is a pure fold over cached data.
 
 import type { GarminClient } from "./garmin-client.js";
-import {
-  Habit,
-  HabitType,
-  HabitValue,
-  JournalData,
-  habitSeries,
-} from "./journal.js";
-import { mean, stddev, variance, confidenceLabel } from "./stats.js";
-import { multipleRegression } from "./stats.js";
+import { Habit, HabitType, JournalData, habitSeries } from "./journal.js";
+import { mean, stddev, variance, confidenceLabel, regress } from "./stats.js";
+import { alignObservations, toNum } from "./observations.js";
 import {
   MetricDef,
   getMetric,
@@ -112,25 +106,6 @@ function round(x: number, dp = 1): number {
   return Math.round(x * f) / f;
 }
 
-/** boolean -> 0/1, numeric -> itself. */
-function toNum(v: HabitValue): number {
-  return typeof v === "number" ? v : v ? 1 : 0;
-}
-
-/** 1 if the ISO date is a Saturday or Sunday, else 0 (UTC-anchored). */
-function isWeekend(date: string): number {
-  const day = new Date(date + "T00:00:00Z").getUTCDay();
-  return day === 0 || day === 6 ? 1 : 0;
-}
-
-interface UsableRow {
-  habit: number;
-  alcohol: number;
-  weekend: number;
-  load: number;
-  y: number;
-}
-
 /**
  * Fit `outcome ~ habit + alcohol + weekend + dailyLoad` for one habit and one
  * outcome and return the tiered, confounder-adjusted cell. Pure; the metric
@@ -156,32 +131,27 @@ export function estimateOutcome(
   const useAlcohol =
     !isAlcohol && data.habits.some((h) => h.id === ALCOHOL_HABIT_ID);
 
-  // Listwise deletion: keep a day only if habit and outcome (at D+lag) are
-  // present — plus alcohol when we're adjusting for it. Load is 0 when absent;
-  // weekend is always known.
-  const rows: UsableRow[] = [];
-  for (const { date, value } of habitSeries(
-    data,
-    habit.id,
-    startDate,
-    endDate
-  )) {
-    const y = metricSeries.get(shiftISODate(date, metric.lagDays));
-    if (y == null) continue;
-    let alcohol = 0;
-    if (useAlcohol) {
-      const alcRaw = data.entries[date]?.[ALCOHOL_HABIT_ID];
-      if (alcRaw == null) continue;
-      alcohol = toNum(alcRaw);
+  // Build the alcohol confounder map (behavior-day D -> drinks) only when we're
+  // adjusting for it; alignObservations then requires it on every kept day.
+  let alcoholMap: Map<string, number> | undefined;
+  if (useAlcohol) {
+    alcoholMap = new Map();
+    for (const { date, value } of habitSeries(
+      data,
+      ALCOHOL_HABIT_ID,
+      startDate,
+      endDate
+    )) {
+      alcoholMap.set(date, toNum(value));
     }
-    rows.push({
-      habit: toNum(value),
-      alcohol,
-      weekend: isWeekend(date),
-      load: loadMap.get(date) ?? 0,
-      y,
-    });
   }
+
+  // The join and its keying/listwise rules live in observations.ts.
+  const rows = alignObservations(
+    habitSeries(data, habit.id, startDate, endDate),
+    { series: metricSeries, lag: metric.lagDays },
+    { alcohol: alcoholMap, load: loadMap }
+  );
 
   const n = rows.length;
   const habitVals = rows.map((r) => r.habit);
@@ -207,29 +177,22 @@ export function estimateOutcome(
     }
   }
 
-  // ── build the design matrix (predictors, no intercept) ───────────────
-  // Habit is column 0 and is guaranteed non-constant by the gates above, so it
-  // survives the constant-column drop and stays first — its coefficient is
-  // therefore coefficients[1] (intercept is coefficients[0]).
-  const columns: { name: string; vals: number[] }[] = [
-    { name: "habit", vals: habitVals },
+  // ── fit outcome ~ habit + [alcohol] + weekend + load ─────────────────
+  // regress drops any constant column and addresses coefficients by name, so
+  // there's no column-order or intercept-index bookkeeping here. The gates above
+  // guarantee the habit column varies, so coef("habit") is present on a good fit.
+  const columns: { name: string; values: number[] }[] = [
+    { name: "habit", values: habitVals },
   ];
   if (useAlcohol) {
-    columns.push({ name: "alcohol", vals: rows.map((r) => r.alcohol) });
+    columns.push({ name: "alcohol", values: rows.map((r) => r.alcohol) });
   }
-  columns.push({ name: "weekend", vals: rows.map((r) => r.weekend) });
-  columns.push({ name: "load", vals: rows.map((r) => r.load) });
-  const kept = columns.filter((c) => variance(c.vals) > 0);
+  columns.push({ name: "weekend", values: rows.map((r) => r.weekend) });
+  columns.push({ name: "load", values: rows.map((r) => r.load) });
 
-  const X = rows.map((_, i) => kept.map((c) => c.vals[i]));
   const y = rows.map((r) => r.y);
-  const reg = multipleRegression(X, y);
-  if (!reg) {
-    return { tier: "none", reason: "not enough data" };
-  }
-
-  // Habit coefficient: intercept is [0], habit is the first predictor -> [1].
-  const habitCoef = reg.coefficients[1];
+  const reg = regress(columns, y);
+  const habitCoef = reg?.coef("habit");
   const meanOutcome = mean(y);
   if (!habitCoef || meanOutcome === 0) {
     return { tier: "none", reason: "not enough data" };
